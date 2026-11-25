@@ -9,6 +9,9 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -57,9 +60,11 @@ import java.util.regex.Pattern;
  */
 public final class GameActivity extends Activity {
 
+    private static final String TAG = "Ps5GameActivity";
     private static final String PS5_HOME_URL = "file:///android_asset/ps5_ui/index.html";
     private static final Pattern CHROME_MAJOR = Pattern.compile("Chrome/(\\d+)");
 
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private LaunchConfig config;
     private WebViewIsolationBridge isolationBridge;
     private FrameLayout webViewHost;
@@ -75,7 +80,9 @@ public final class GameActivity extends Activity {
 
     private String bridgeScript;
     private boolean inGameMode = false;
+    private boolean awaitingCacheClearReload = false;
     private String lastLaunchMode = "default";
+    private volatile String lastConsoleError = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +91,7 @@ public final class GameActivity extends Activity {
         config = LaunchConfig.load(this);
         bridgeScript = readAssetText("mobile_bridge.js");
         isolationBridge = new WebViewIsolationBridge();
+        isolationBridge.setBcDecodeScript(readAssetText("bc_decode.js"));
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyImmersiveFullscreen();
@@ -119,6 +127,11 @@ public final class GameActivity extends Activity {
                     config = LaunchConfig.load(GameActivity.this);
                 }
                 launchGtaRuntime(lastLaunchMode);
+            }
+
+            @Override
+            public void onClearCacheAndReload() {
+                clearCacheAndReload();
             }
 
             @Override
@@ -302,6 +315,13 @@ public final class GameActivity extends Activity {
         wv.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
+                if (cm != null && cm.message() != null) {
+                    String m = cm.message();
+                    if (cm.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        lastConsoleError = m;
+                        Log.w(TAG, "[WebView ERR] " + m + " (" + cm.sourceId() + ":" + cm.lineNumber() + ")");
+                    }
+                }
                 return true;
             }
         });
@@ -309,9 +329,14 @@ public final class GameActivity extends Activity {
         wv.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                if (forGame && isolationBridge.shouldInterceptDocument(request)) {
-                    WebResourceResponse isolated = isolationBridge.fetchIsolatedDocument(request);
-                    if (isolated != null) return isolated;
+                if (forGame) {
+                    if (isolationBridge.shouldInterceptDocument(request)) {
+                        WebResourceResponse isolated = isolationBridge.fetchIsolatedDocument(request);
+                        if (isolated != null) return isolated;
+                    } else if (isolationBridge.shouldInterceptWorkerPatch(request)) {
+                        WebResourceResponse patched = isolationBridge.fetchPatchedWorker(request);
+                        if (patched != null) return patched;
+                    }
                 }
                 return super.shouldInterceptRequest(view, request);
             }
@@ -395,6 +420,8 @@ public final class GameActivity extends Activity {
 
     private void launchGtaRuntime(String mode) {
         lastLaunchMode = (mode == null || mode.isEmpty()) ? "default" : mode;
+        lastConsoleError = "";
+        awaitingCacheClearReload = false;
         config = LaunchConfig.load(this);
 
         inGameMode = true;
@@ -408,6 +435,25 @@ public final class GameActivity extends Activity {
         WebView gameWv = createConfiguredWebView(true);
         String targetUrl = config.buildGameUrl(lastLaunchMode);
         gameWv.loadUrl(targetUrl);
+    }
+
+    private void clearCacheAndReload() {
+        awaitingCacheClearReload = true;
+        if (activeWebView != null) {
+            try {
+                activeWebView.clearCache(true);
+                activeWebView.evaluateJavascript(
+                        "window.__gtaMobile && window.__gtaMobile.clearStorageCache && window.__gtaMobile.clearStorageCache();",
+                        null);
+            } catch (Throwable ignored) {}
+        }
+        // Fallback timeout in case the WebView renderer is unresponsive
+        mainHandler.postDelayed(() -> {
+            if (awaitingCacheClearReload && inGameMode) {
+                awaitingCacheClearReload = false;
+                launchGtaRuntime(lastLaunchMode);
+            }
+        }, 1800);
     }
 
     private void openWebViewPlayStore() {
@@ -539,7 +585,45 @@ public final class GameActivity extends Activity {
 
         @JavascriptInterface
         public void onProgress(final int pct, final String label) {
-            // Tracked via in-page loader & title dock
+            // Legacy 2-arg hook
+        }
+
+        @JavascriptInterface
+        public void onProgress(final int pct, final String label, final String dataText, final String consoleLine) {
+            // Tracked via live in-page #ls-log & stall detector
+        }
+
+        @JavascriptInterface
+        public void onLoadingStall(final int pct, final String label, final String dataText, final String consoleLine) {
+            runOnUiThread(() -> {
+                if (!inGameMode) return;
+                StringBuilder sb = new StringBuilder();
+                sb.append("Loading paused at ").append(pct).append("%");
+                if (label != null && !label.isEmpty()) {
+                    sb.append(" (").append(label).append(")");
+                }
+                sb.append('.');
+                if (dataText != null && !dataText.isEmpty()) {
+                    sb.append("\nStream: ").append(dataText);
+                }
+                String diag = (consoleLine != null && !consoleLine.isEmpty()) ? consoleLine : lastConsoleError;
+                if (diag != null && !diag.isEmpty()) {
+                    if (diag.length() > 140) diag = diag.substring(0, 140) + "…";
+                    sb.append("\nLog: ").append(diag);
+                }
+                sb.append("\nTap WAIT to keep streaming, CLEAR CACHE to reset corrupt stream cache, or POTATO MODE.");
+                gameControlsOverlay.showStallWarning(sb.toString());
+            });
+        }
+
+        @JavascriptInterface
+        public void onCacheCleared() {
+            runOnUiThread(() -> {
+                if (awaitingCacheClearReload && inGameMode) {
+                    awaitingCacheClearReload = false;
+                    launchGtaRuntime(lastLaunchMode);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -598,7 +682,7 @@ public final class GameActivity extends Activity {
                 } else if (lower.contains("no memory") || lower.contains("out of memory")) {
                     gameControlsOverlay.showError(
                             "Not enough free RAM/VRAM for current graphics tier.\n"
-                                    + "Close other apps and tap POTATO MODE (uses 32-bit memory + minimal VRAM).",
+                                    + "Close other apps and tap POTATO MODE (minimal VRAM + 2 worker cores).",
                             false);
                 } else {
                     gameControlsOverlay.showError(msg, false);

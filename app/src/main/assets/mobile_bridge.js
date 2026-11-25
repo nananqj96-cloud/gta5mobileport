@@ -35,8 +35,8 @@
             style.textContent = [
                 'html, body, #canvas { touch-action: none !important; user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; overscroll-behavior: none !important; }',
                 '#fps { display: none !important; }',
-                '#hud { top: 44px !important; font-size: 11px !important; opacity: 0.85 !important; }',
-                isLowEnd ? '#ls-log { display: none !important; }' : ''
+                '#hud { top: 44px !important; font-size: 11px !important; opacity: 0.90 !important; }',
+                '#ls-log { display: block !important; margin-bottom: 54px !important; max-width: 82vw !important; opacity: 0.92 !important; }'
             ].join('\n');
             host.appendChild(style);
         } catch (e) {}
@@ -442,10 +442,39 @@
         releaseAll: function () {
             Array.from(heldKeys).forEach(function (code) { dispatchKey(code, false); });
             Array.from(heldButtons).forEach(function (btn) { window.__gtaMobile.mouseButton(btn, false); });
+        },
+
+        clearStorageCache: function () {
+            // Purges OPFS streamed data cache (gamedata / gamedata-b) without touching saves (gta5-userdata)
+            (async function () {
+                try {
+                    if (navigator.storage && typeof navigator.storage.getDirectory === 'function') {
+                        const root = await navigator.storage.getDirectory();
+                        for (const dirName of ['gamedata', 'gamedata-b']) {
+                            try { await root.removeEntry(dirName, { recursive: true }); } catch (e) {}
+                        }
+                    }
+                } catch (e) {}
+                try {
+                    if (typeof caches !== 'undefined' && typeof caches.keys === 'function') {
+                        const keys = await caches.keys();
+                        for (const k of keys) {
+                            try { await caches.delete(k); } catch (e) {}
+                        }
+                    }
+                } catch (e) {}
+                notifyAndroid('onCacheCleared');
+            })();
         }
     };
 
     // 7. BroadcastChannel Telemetry -> Native Android HUD & Stats Viewer
+    let lastConsoleLine = '';
+    let lastDataText = '';
+    let lastHudErr = '';
+    let lastAdvanceAt = Date.now();
+    let stallNotified = false;
+
     try {
         const fpsBc = new BroadcastChannel('game-fps');
         fpsBc.onmessage = function (ev) {
@@ -459,8 +488,16 @@
         const progBc = new BroadcastChannel('game-progress');
         progBc.onmessage = function (ev) {
             const m = ev.data || {};
+            if (Array.isArray(m.lines) && m.lines.length) {
+                const ln = String(m.lines[m.lines.length - 1] || '').trim();
+                if (ln) {
+                    lastConsoleLine = ln;
+                    lastAdvanceAt = Date.now();
+                }
+            }
             if (typeof m.pct === 'number' || m.label) {
-                notifyAndroid('onProgress', m.pct || 0, m.label || '');
+                lastAdvanceAt = Date.now();
+                notifyAndroid('onProgress', m.pct || 0, m.label || '', lastDataText, lastConsoleLine);
             }
             if (m.ready || m.world) {
                 if (!state.worldReady) {
@@ -485,10 +522,27 @@
         };
     } catch (e) {}
 
-    // 8. Poll loading state & visible title screen buttons
+    // 8. Poll loading state, engine console/HUD diagnostics, & visible title screen buttons
     let sawLoading = false;
     setInterval(function () {
         if (document.readyState === 'loading') return;
+
+        // Watch #hud for fatal GPU / WASM / crash notices even if loading screen disappeared
+        const hudEl = document.getElementById('hud');
+        if (hudEl) {
+            const hudTxt = (hudEl.textContent || '').trim();
+            if (hudTxt && hudTxt !== lastHudErr) {
+                const lowHud = hudTxt.toLowerCase();
+                if (lowHud.indexOf('gpu') >= 0 && (lowHud.indexOf('lost') >= 0 || lowHud.indexOf('error') >= 0)
+                        || lowHud.indexOf('crash') >= 0
+                        || lowHud.indexOf('out of memory') >= 0
+                        || lowHud.indexOf('abort') >= 0) {
+                    lastHudErr = hudTxt;
+                    notifyAndroid('onEngineError', hudTxt);
+                }
+            }
+        }
+
         const loading = document.getElementById('loading');
         if (loading) sawLoading = true;
         const isGone = !loading || getComputedStyle(loading).opacity === '0' || getComputedStyle(loading).display === 'none';
@@ -500,14 +554,37 @@
             return;
         }
         if (!loading) return;
+
         const pctEl = document.getElementById('pct');
         const labelEl = document.getElementById('label');
+        const dataEl = document.getElementById('data');
+        const consoleEl = document.getElementById('console');
+
         const pct = pctEl ? parseInt(pctEl.textContent, 10) || 0 : 0;
         const label = labelEl ? (labelEl.textContent || '').trim() : '';
+        const dataTxt = dataEl ? (dataEl.textContent || '').trim() : '';
+        const conTxt = consoleEl ? (consoleEl.textContent || '').trim() : '';
+        if (conTxt) {
+            const lines = conTxt.split('\n');
+            const latest = (lines[lines.length - 1] || '').trim();
+            if (latest && latest !== lastConsoleLine) {
+                lastConsoleLine = latest;
+                lastAdvanceAt = Date.now();
+            }
+        }
+        if (dataTxt && dataTxt !== lastDataText) {
+            lastDataText = dataTxt;
+            lastAdvanceAt = Date.now();
+        }
+
         if (pct !== state.lastPct || label !== state.lastLabel) {
+            if (pct > state.lastPct || label !== state.lastLabel) {
+                lastAdvanceAt = Date.now();
+                stallNotified = false;
+            }
             state.lastPct = pct;
             state.lastLabel = label;
-            notifyAndroid('onProgress', pct, label);
+            notifyAndroid('onProgress', pct, label, lastDataText, lastConsoleLine);
             const lowLbl = label.toLowerCase();
             if (lowLbl.indexOf('not cross-origin isolated') >= 0
                     || lowLbl.indexOf('no memory') >= 0
@@ -515,6 +592,14 @@
                     || lowLbl.indexOf('cannot run the game') >= 0) {
                 notifyAndroid('onEngineError', label);
             }
+        }
+
+        // Detect prolonged loading stall (e.g. >50s with zero %/data/log movement or "No progress for")
+        const lowLblCheck = label.toLowerCase();
+        if (!state.worldReady && !stallNotified && pct >= 50 && pct < 100
+                && (lowLblCheck.indexOf('no progress for') >= 0 || (Date.now() - lastAdvanceAt > 50000))) {
+            stallNotified = true;
+            notifyAndroid('onLoadingStall', pct, label, lastDataText, lastConsoleLine);
         }
 
         const modes = document.getElementById('modes');

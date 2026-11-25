@@ -239,8 +239,9 @@ public final class LaunchConfig {
     }
 
     /**
-     * Builds the tuned runtime URL (either http://localhost:<PORT>/ via our COOP/COEP Chrome proxy
-     * or https://playgta5.com/) with real RAGE engine graphics & render-distance arguments.
+     * Builds the tuned runtime URL for https://playgta5.com/ with clean, verified RAGE engine
+     * arguments (avoiding conflicting flags like -safemode / -useMinimumSettings or duplicate
+     * LOW_ARGS that could stall GTA V's settings parser on mobile WebGPU).
      */
     public String buildGameUrl(String baseOrigin, String launchMode) {
         String root = (baseOrigin == null || baseOrigin.isEmpty()) ? "https://playgta5.com/" : baseOrigin;
@@ -255,7 +256,6 @@ public final class LaunchConfig {
         b.appendQueryParameter("scale", String.format(Locale.US, "%.2f", resScalePct / 100.0));
         b.appendQueryParameter("shadows", shadowsLevel >= 0 ? "1" : "0");
         b.appendQueryParameter("fixed", "1");
-        b.appendQueryParameter("mem32", "1");
         if (engineLowProfile) {
             b.appendQueryParameter("cores", String.valueOf(engineCores));
             b.appendQueryParameter("slots", String.valueOf(gpuSlots));
@@ -273,65 +273,52 @@ public final class LaunchConfig {
             b.appendQueryParameter("map", "env_test");
         }
 
-        // Real GTA V PC SettingsManager.cpp command-line arguments (fixes playgta5.com graphics floor!)
+        // Only emit clean, verified RAGE SettingsManager.cpp CLI flags (never -safemode!)
         List<String> args = new ArrayList<>();
-        int texQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int shaderQ = texQ;
-        int reflQ = texQ;
-        int partQ = texQ;
-        int grassQ = texQ;
-        int postFx = texQ;
-        int waterQ = graphicsPreset >= PRESET_HIGH ? 1 : 0;
-        int aniso = graphicsPreset >= PRESET_HIGH ? 4 : (graphicsPreset == PRESET_MEDIUM ? 2 : 0);
-
-        if (graphicsPreset == PRESET_POTATO) {
-            args.add("-useMinimumSettings");
-            args.add("-safemode");
-            args.add("-ignoreprofile");
-        } else if (graphicsPreset <= PRESET_LOW) {
-            args.add("-ignoreprofile");
+        if (engineLowProfile) {
+            // playgta5.com already prepends its verified LOW_ARGS when ?low=1:
+            // (-textureQuality=0, -pedVariety=0, -vehicleVariety=0, -shadowQuality=-1,
+            //  -reflectionQuality=0, -particleQuality=0, -grassQuality=0, -cityDensity=0,
+            //  -lodScale=0, -pedLodBias=0, -vehicleLodBias=0).
+            // Only add overrides that differ from LOW_ARGS!
+            if (shadowsLevel >= 0) {
+                args.add("-shadowQuality=" + shadowsLevel);
+            }
+            if (renderDistance >= 0) {
+                float lod = Math.max(0.0f, Math.min(1.0f, renderDistance / 100.0f));
+                String lodStr = String.format(Locale.US, "%.2f", lod);
+                args.add("-lodScale=" + lodStr);
+                args.add("-pedLodBias=" + lodStr);
+                args.add("-vehicleLodBias=" + lodStr);
+                args.add("-cityDensity=" + lodStr);
+            }
+        } else {
+            int texQ = graphicsPreset >= PRESET_HIGH ? 2 : 1;
+            args.add("-textureQuality=" + texQ);
+            args.add("-shaderQuality=" + texQ);
+            args.add("-shadowQuality=" + shadowsLevel);
+            args.add("-reflectionQuality=" + texQ);
+            args.add("-particleQuality=" + texQ);
+            args.add("-grassQuality=" + texQ);
+            args.add("-postFX=" + texQ);
+            if (renderDistance >= 0) {
+                float lod = Math.max(0.0f, Math.min(1.0f, renderDistance / 100.0f));
+                String lodStr = String.format(Locale.US, "%.2f", lod);
+                args.add("-lodScale=" + lodStr);
+                args.add("-pedLodBias=" + lodStr);
+                args.add("-vehicleLodBias=" + lodStr);
+                args.add("-cityDensity=" + lodStr);
+            }
         }
 
-        args.add("-textureQuality=" + texQ);
-        args.add("-shaderQuality=" + shaderQ);
-        args.add("-shadowQuality=" + shadowsLevel); // -1 disables cascade shadow pass entirely!
-        args.add("-shadowSoftness=0");
-        args.add("-reflectionQuality=" + reflQ);
-        args.add("-waterQuality=" + waterQ);
-        args.add("-particleQuality=" + partQ);
-        args.add("-grassQuality=" + grassQ);
-        args.add("-postFX=" + postFx);
-        args.add("-tessellation=0");
-        args.add("-anisotropicQualityLevel=" + aniso);
-        args.add("-SSAO=" + (graphicsPreset >= PRESET_HIGH ? 1 : 0));
-        args.add("-fxaa=" + (graphicsPreset >= PRESET_MEDIUM ? 1 : 0));
-        if (graphicsPreset <= PRESET_LOW) {
-            args.add("-noInGameDOF");
-            args.add("-pedVariety=0");
-            args.add("-vehicleVariety=0");
+        if (!args.isEmpty()) {
+            StringBuilder joined = new StringBuilder();
+            for (int i = 0; i < args.size(); i++) {
+                if (i > 0) joined.append(',');
+                joined.append(args.get(i));
+            }
+            b.appendQueryParameter("args", joined.toString());
         }
-
-        // Render Distance override: -1 = leave at GTA V engine default, 0..100 = exact LOD/streaming scaling
-        if (renderDistance >= 0) {
-            float lod = Math.max(0.0f, Math.min(1.0f, renderDistance / 100.0f));
-            String lodStr = String.format(Locale.US, "%.2f", lod);
-            args.add("-lodScale=" + lodStr);
-            args.add("-pedLodBias=" + lodStr);
-            args.add("-vehicleLodBias=" + lodStr);
-            args.add("-cityDensity=" + lodStr);
-        } else if (graphicsPreset <= PRESET_ULTRA_LOW) {
-            args.add("-cityDensity=0");
-            args.add("-lodScale=0");
-            args.add("-pedLodBias=0");
-            args.add("-vehicleLodBias=0");
-        }
-
-        StringBuilder joined = new StringBuilder();
-        for (int i = 0; i < args.size(); i++) {
-            if (i > 0) joined.append(',');
-            joined.append(args.get(i));
-        }
-        b.appendQueryParameter("args", joined.toString());
         return b.build().toString();
     }
 

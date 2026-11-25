@@ -26,6 +26,7 @@ public final class MobileControlsOverlay extends FrameLayout {
         void onOpenSettings();
         void onReturnToPs5Home();
         void onReloadGame(boolean forcePotatoLowEnd);
+        void onClearCacheAndReload();
         void onUpdateWebView();
     }
 
@@ -53,6 +54,7 @@ public final class MobileControlsOverlay extends FrameLayout {
     private final LinearLayout errorBanner;
     private final TextView tvErrorMsg;
     private final TextView btnUpdateWebView;
+    private final TextView btnDismissError;
 
     private final TextView btnMode;
     private final TextView btnSens;
@@ -198,16 +200,22 @@ public final class MobileControlsOverlay extends FrameLayout {
             hideError();
             if (hostCallback != null) hostCallback.onReloadGame(true);
         });
+        addTitleChip(context, errActions, "CLEAR CACHE", SKY, () -> {
+            hideError();
+            if (hostCallback != null) hostCallback.onClearCacheAndReload();
+        });
         addTitleChip(context, errActions, "RELOAD", GOLD, () -> {
             hideError();
             if (hostCallback != null) hostCallback.onReloadGame(false);
         });
+        btnDismissError = addTitleChipView(context, errActions, "WAIT", SLATE, this::hideError);
+        btnDismissError.setVisibility(View.GONE);
         addTitleChip(context, errActions, "PS5 HOME", CRIMSON, () -> {
             if (hostCallback != null) hostCallback.onReturnToPs5Home();
         });
         errorBanner.addView(errActions);
 
-        LayoutParams errLp = new LayoutParams(dp(480), LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        LayoutParams errLp = new LayoutParams(dp(530), LayoutParams.WRAP_CONTENT, Gravity.CENTER);
         addView(errorBanner, errLp);
 
         applyControlMode(ControlMode.FOOT);
@@ -431,6 +439,20 @@ public final class MobileControlsOverlay extends FrameLayout {
         tvErrorMsg.setText(message);
         if (btnUpdateWebView != null) {
             btnUpdateWebView.setVisibility(showWebViewUpdate ? View.VISIBLE : View.GONE);
+        }
+        if (btnDismissError != null) {
+            btnDismissError.setVisibility(View.GONE);
+        }
+        errorBanner.setVisibility(View.VISIBLE);
+    }
+
+    public void showStallWarning(String message) {
+        tvErrorMsg.setText(message);
+        if (btnUpdateWebView != null) {
+            btnUpdateWebView.setVisibility(View.GONE);
+        }
+        if (btnDismissError != null) {
+            btnDismissError.setVisibility(View.VISIBLE);
         }
         errorBanner.setVisibility(View.VISIBLE);
     }
