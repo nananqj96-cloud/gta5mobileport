@@ -21,6 +21,7 @@
     motionBlur: urlParams.get('vbx_mblur') === '1',
     motionBlurStrength: Math.max(0, Math.min(100, parseInt(urlParams.get('vbx_mblur_str') || '55', 10) || 55)),
     optimizationMode: urlParams.get('vbx_opt') === '1',
+    lookSensitivity: Math.max(20, Math.min(300, parseInt(urlParams.get('vbx_sens') || '100', 10) || 100)),
     cheatOpen: false,
     autoGodMode: false,
     vehicleMode: false, // Toggled automatically when Y / Triangle is pressed
@@ -48,6 +49,64 @@
     window.WebSocket.prototype = OrigWS.prototype;
     Object.assign(window.WebSocket, OrigWS);
   } catch (e) {}
+
+  // ==================== 0B. REAL GTA V LOOK SENSITIVITY HOOK (MOUSE + POINTER LOCK) ====================
+  // Scales MouseEvent/PointerEvent movementX & movementY with sub-pixel fractional carry so
+  // both slow (20%) and fast (300%) camera look work smoothly in GTA V without touching cursor clientX/Y.
+  (function installLookSensitivityHook() {
+    try {
+      const descX = Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'movementX');
+      const descY = Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'movementY');
+      if (!descX || !descY || !descX.get || !descY.get || !descX.configurable || !descY.configurable) return;
+
+      const origGetX = descX.get;
+      const origGetY = descY.get;
+      const scaledCache = new WeakMap();
+      let carryX = 0;
+      let carryY = 0;
+
+      function computeScaled(ev) {
+        let cached = scaledCache.get(ev);
+        if (cached) return cached;
+
+        const rawX = origGetX.call(ev);
+        const rawY = origGetY.call(ev);
+
+        // Synthetic events (controller right-stick) are already scaled by lookSensitivity
+        if (!ev.isTrusted || vbxState.lookSensitivity === 100) {
+          cached = { x: rawX, y: rawY };
+          scaledCache.set(ev, cached);
+          return cached;
+        }
+
+        const factor = Math.max(0.20, Math.min(3.00, vbxState.lookSensitivity / 100.0));
+        const fx = rawX * factor + carryX;
+        const fy = rawY * factor + carryY;
+        const ix = fx >= 0 ? Math.floor(fx) : Math.ceil(fx);
+        const iy = fy >= 0 ? Math.floor(fy) : Math.ceil(fy);
+        carryX = fx - ix;
+        carryY = fy - iy;
+        // Clamp fractional residual safely
+        if (Math.abs(carryX) > 2) carryX = 0;
+        if (Math.abs(carryY) > 2) carryY = 0;
+
+        cached = { x: ix, y: iy };
+        scaledCache.set(ev, cached);
+        return cached;
+      }
+
+      Object.defineProperty(MouseEvent.prototype, 'movementX', {
+        configurable: true,
+        enumerable: true,
+        get: function () { return computeScaled(this).x; }
+      });
+      Object.defineProperty(MouseEvent.prototype, 'movementY', {
+        configurable: true,
+        enumerable: true,
+        get: function () { return computeScaled(this).y; }
+      });
+    } catch (e) {}
+  })();
 
   // ==================== 1. REAL OPTIMIZATION MODE (VISUAL-PRESERVING) ====================
   // Runs BEFORE playgta5.com boots so GPU adapter & DPR fillrate optimizations take effect immediately!
@@ -339,6 +398,13 @@
       if (typeof s.motionBlur === 'boolean') vbxState.motionBlur = s.motionBlur;
       if (typeof s.motionBlurStrength === 'number') vbxState.motionBlurStrength = s.motionBlurStrength;
       if (typeof s.optimizationMode === 'boolean') vbxState.optimizationMode = s.optimizationMode;
+      if (typeof s.lookSensitivity === 'number') {
+        vbxState.lookSensitivity = Math.max(20, Math.min(300, Math.round(s.lookSensitivity)));
+        const sensInp = document.getElementById('vbx-opt-sens');
+        const sensLbl = document.getElementById('vbx-sens-val');
+        if (sensInp && document.activeElement !== sensInp) sensInp.value = String(vbxState.lookSensitivity);
+        if (sensLbl) sensLbl.textContent = vbxState.lookSensitivity + '%';
+      }
       updateUiVisibility();
     } catch (e) {}
   }
@@ -654,7 +720,8 @@
           if (cur.tagName === 'INPUT' && cur.type === 'range') {
             const min = parseFloat(cur.min || '0');
             const max = parseFloat(cur.max || '100');
-            const next = Math.max(min, Math.min(max, (parseFloat(cur.value || '0') + dir * 5)));
+            const step = Math.max(1, parseFloat(cur.step || '5'));
+            const next = Math.max(min, Math.min(max, (parseFloat(cur.value || '0') + dir * step)));
             cur.value = String(next);
             cur.dispatchEvent(new Event('input', { bubbles: true }));
             cur.dispatchEvent(new Event('change', { bubbles: true }));
@@ -670,9 +737,14 @@
             cur.checked = !cur.checked;
             cur.dispatchEvent(new Event('change', { bubbles: true }));
           } else if (cur.tagName === 'INPUT' && cur.type === 'range') {
-            const next = (parseInt(cur.value, 10) + 10) % 105;
-            cur.value = String(Math.min(100, next));
+            const min = parseFloat(cur.min || '0');
+            const max = parseFloat(cur.max || '100');
+            const step = Math.max(5, parseFloat(cur.step || '10'));
+            let next = parseFloat(cur.value || String(min)) + step;
+            if (next > max) next = min;
+            cur.value = String(next);
             cur.dispatchEvent(new Event('input', { bubbles: true }));
+            cur.dispatchEvent(new Event('change', { bubbles: true }));
           } else if (cur.tagName === 'INPUT' && cur.type === 'text') {
             cur.focus();
           } else {
@@ -747,11 +819,12 @@
           dispatchKey('KeyE', false);
         }
 
-        // Right Stick -> Smooth 360° Camera Look (non-linear acceleration curve + motion blur feed!)
+        // Right Stick -> Smooth 360° Camera Look (customizable lookSensitivity 20%..300% + motion blur feed!)
         const rMag = Math.hypot(rx, ry);
         if (rMag > deadR) {
           const norm = (rMag - deadR) / (1.0 - deadR);
-          const curved = norm * norm * 16.5;
+          const sensMul = Math.max(0.20, Math.min(3.00, vbxState.lookSensitivity / 100.0));
+          const curved = norm * norm * 16.5 * sensMul;
           const rdx = (rx / rMag) * curved;
           const rdy = (ry / rMag) * curved;
           mbMotion.rawVx += rdx * 2.2;
@@ -931,7 +1004,17 @@
         </div>
         <div class="vbx-toggle-row" style="flex-direction:column;align-items:stretch;gap:6px;">
           <div style="display:flex;justify-content:space-between;"><span>Motion Blur Intensity</span><strong id="vbx-mb-val">${vbxState.motionBlurStrength}%</strong></div>
-          <input type="range" id="vbx-opt-mbstr" min="0" max="100" value="${vbxState.motionBlurStrength}">
+          <input type="range" id="vbx-opt-mbstr" min="0" max="100" step="5" value="${vbxState.motionBlurStrength}">
+        </div>
+        <div class="vbx-toggle-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div><strong>Camera Look Sensitivity</strong><div style="font-size:10.5px;color:#94a3b8">Mouse &amp; Controller Right-Stick (20%–300%)</div></div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <strong id="vbx-sens-val" style="color:#38bdf8;">${vbxState.lookSensitivity}%</strong>
+              <button class="vbx-mini-btn" id="vbx-sens-reset" style="padding:2px 8px;font-size:10.5px;">100%</button>
+            </div>
+          </div>
+          <input type="range" id="vbx-opt-sens" min="20" max="300" step="5" value="${vbxState.lookSensitivity}">
         </div>
         <div class="vbx-toggle-row">
           <div><strong>Optimization Mode (Same Visuals)</strong><div style="font-size:11px;color:#94a3b8">Hi-Perf GPU, DPR clamp, trims PostFX/MSAA hogs</div></div>
@@ -959,6 +1042,19 @@
         vbxState.motionBlurStrength = parseInt(e.target.value, 10) || 0;
         body.querySelector('#vbx-mb-val').textContent = vbxState.motionBlurStrength + '%';
         pushConfigUpdate({ motionBlurStrength: vbxState.motionBlurStrength });
+      };
+      body.querySelector('#vbx-opt-sens').oninput = (e) => {
+        vbxState.lookSensitivity = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100));
+        body.querySelector('#vbx-sens-val').textContent = vbxState.lookSensitivity + '%';
+        pushConfigUpdate({ lookSensitivity: vbxState.lookSensitivity });
+      };
+      body.querySelector('#vbx-sens-reset').onclick = () => {
+        vbxState.lookSensitivity = 100;
+        const sl = body.querySelector('#vbx-opt-sens');
+        if (sl) sl.value = '100';
+        body.querySelector('#vbx-sens-val').textContent = '100%';
+        pushConfigUpdate({ lookSensitivity: 100 });
+        showToast('Camera Look Sensitivity reset to 100%', '#38bdf8');
       };
       body.querySelector('#vbx-opt-perf').onchange = (e) => {
         vbxState.optimizationMode = e.target.checked;
@@ -1171,6 +1267,16 @@
       vbxState.motionBlur = !vbxState.motionBlur;
       pushConfigUpdate({ motionBlur: vbxState.motionBlur });
       showToast('Motion Blur: ' + (vbxState.motionBlur ? 'ON (' + vbxState.motionBlurStrength + '%)' : 'OFF'), '#0ae0ff');
+    } else if (e.code === 'F6' || e.code === 'F7') {
+      e.preventDefault();
+      const delta = (e.code === 'F7') ? 10 : -10;
+      vbxState.lookSensitivity = Math.max(20, Math.min(300, vbxState.lookSensitivity + delta));
+      pushConfigUpdate({ lookSensitivity: vbxState.lookSensitivity });
+      const sensInp = document.getElementById('vbx-opt-sens');
+      const sensLbl = document.getElementById('vbx-sens-val');
+      if (sensInp) sensInp.value = String(vbxState.lookSensitivity);
+      if (sensLbl) sensLbl.textContent = vbxState.lookSensitivity + '%';
+      showToast('Camera Look Sensitivity: ' + vbxState.lookSensitivity + '%', '#38bdf8');
     } else if (e.code === 'F9') {
       e.preventDefault();
       returnToConsoleDashboard();
@@ -1201,6 +1307,7 @@
       const f = [];
       if (vbxState.optimizationMode) f.push('OPT:ON');
       if (vbxState.motionBlur) f.push('MBLUR:' + vbxState.motionBlurStrength + '%');
+      if (vbxState.lookSensitivity !== 100) f.push('SENS:' + vbxState.lookSensitivity + '%');
       flagsEl.textContent = f.length ? f.join(' · ') : 'STANDARD RENDER';
     }
     const bCpu = document.getElementById('vbx-bar-cpu');

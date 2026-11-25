@@ -1177,6 +1177,7 @@
     optimizationMode: false,
     motionBlur: false,
     motionBlurStrength: 55,
+    lookSensitivity: 100,
     showDebugHud: true,
     enableCheatMenu: true,
     preset: 1,
@@ -1591,7 +1592,10 @@
         const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
-          openModal('Grand Theft Auto VI — Launched', `<p>Opened custom file:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Launched directly from PS5 Dashboard.</p>`, [
+          const devExtra = d.isExe
+            ? `<p style="font-size:13px;color:#38bdf8;margin-top:8px;">Full-Screen Dev Overlay: <b>${d.devOverlay ? 'ACTIVE (F10 toggles)' : 'OFF'}</b> &nbsp;·&nbsp; Fake FPS Cap: <b>${d.fakeFps ? (d.fakeFpsLimit + ' FPS MAX') : 'OFF'}</b></p>`
+            : '';
+          openModal('Grand Theft Auto VI — Launched', `<p>Opened custom file:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p>${devExtra}<p style="font-size:13px;color:#94a3b8;">Launched directly from PS5 Dashboard.</p>`, [
             { label: 'Continue', primary: true, fn: closeModal }
           ]);
         } else {
@@ -1616,7 +1620,8 @@
       + '&vbx_cheats=' + (appState.enableCheatMenu ? '1' : '0')
       + '&vbx_mblur=' + (appState.motionBlur ? '1' : '0')
       + '&vbx_mblur_str=' + appState.motionBlurStrength
-      + '&vbx_opt=' + (appState.optimizationMode ? '1' : '0');
+      + '&vbx_opt=' + (appState.optimizationMode ? '1' : '0')
+      + '&vbx_sens=' + appState.lookSensitivity;
   }
 
   // ==================== OFFICIAL PS5 SETTINGS CATEGORIES (14 WORKING TABS INCLUDING JAILBREAK!) ====================
@@ -2006,7 +2011,8 @@
         <div class="sub">Configure GTA V video output, Optimization Mode, Motion Blur, and Real Hardware Debug HUD.</div>
         <div class="ps5-opt-row"><div><div class="lbl">Optimization Mode (Keep Same Visuals)</div><div class="desc">High-performance GPU lock, HiDPI fillrate clamp, and PostFX/MSAA trimming for higher FPS without muddy textures</div></div>${mkSwitch('set-opt', appState.optimizationMode)}</div>
         <div class="ps5-opt-row"><div><div class="lbl">Motion Blur (Stutter Smoothing)</div><div class="desc">Smoothly blends rapid motion &amp; frame drops so stutters feel less jarring</div></div>${mkSwitch('set-mb', appState.motionBlur)}</div>
-        <div class="ps5-opt-row"><div><div class="lbl">Motion Blur Strength (<span id="mbLblVal">${appState.motionBlurStrength}%</span>)</div><div class="desc">Higher values give stronger stutter-masking blur</div></div><input type="range" id="set-mb-str" min="0" max="100" value="${appState.motionBlurStrength}" style="width:200px;"></div>
+        <div class="ps5-opt-row"><div><div class="lbl">Motion Blur Strength (<span id="mbLblVal">${appState.motionBlurStrength}%</span>)</div><div class="desc">Higher values give stronger stutter-masking blur</div></div><input type="range" id="set-mb-str" min="0" max="100" step="5" value="${appState.motionBlurStrength}" style="width:200px;"></div>
+        <div class="ps5-opt-row"><div><div class="lbl">GTA V Camera Look Sensitivity (<span id="sensLblVal">${appState.lookSensitivity}%</span>)</div><div class="desc">Controls both Mouse &amp; Controller Right-Stick camera speed inside GTA V (20%–300%)</div></div><input type="range" id="set-look-sens" min="20" max="300" step="5" value="${appState.lookSensitivity}" style="width:200px;"></div>
         <div class="ps5-opt-row"><div><div class="lbl">Real Hardware Debug Overlay (CPU / GPU / FPS)</div><div class="desc">Shows real Windows CPU %, GPU 3D %, VRAM &amp; real FPS on GTA V (toggle anytime with F3)</div></div>${mkSwitch('set-hud', appState.showDebugHud)}</div>
         <div class="ps5-opt-row"><div><div class="lbl">Resolution Target</div><div class="desc">Applied when launching GTA V</div></div>
           <select class="ps5-select" id="set-res">
@@ -2024,6 +2030,11 @@
         pane.querySelector('#mbLblVal').textContent = v + '%';
         pushConfig({ motionBlurStrength: v });
       };
+      pane.querySelector('#set-look-sens').oninput = (e) => {
+        const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100));
+        pane.querySelector('#sensLblVal').textContent = v + '%';
+        pushConfig({ lookSensitivity: v });
+      };
       pane.querySelector('#set-hud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
       pane.querySelector('#set-res').onchange = (e) => pushConfig({ resIndex: parseInt(e.target.value, 10) });
     } else if (cat.id === 'accessr') {
@@ -2033,9 +2044,15 @@
         <h2>Accessories — Controllers (DualSense / Xbox)</h2>
         <div class="sub">Full controller support is active across the PS5 UI and inside GTA V with authentic GTA V default button mappings.</div>
         <div class="ps5-opt-row"><div><div class="lbl">Connected Controller</div><div class="desc" id="padLiveName">${escapeHtml(padLabel)}</div></div><button class="ps5-ctrl-btn primary" id="btnVibeTest">Test Vibration</button></div>
+        <div class="ps5-opt-row"><div><div class="lbl">GTA V Look Sensitivity (<span id="padSensLbl">${appState.lookSensitivity}%</span>)</div><div class="desc">Adjusts Right-Stick &amp; Mouse camera speed in GTA V (also tunable live with F6 / F7 or Cheat Drawer)</div></div><input type="range" id="set-pad-sens" min="20" max="300" step="5" value="${appState.lookSensitivity}" style="width:200px;"></div>
         <div class="ps5-opt-row"><div><div class="lbl">GTA V Default Controls (On-Foot)</div><div class="desc">L-Stick: Move · R-Stick: Camera · R2: Shoot · L2: Aim · R1: Cover · L1: Weapon Wheel · ✕: Sprint · □: Jump · ○: Reload · △: Enter Vehicle</div></div></div>
         <div class="ps5-opt-row"><div><div class="lbl">GTA V Default Controls (Vehicle)</div><div class="desc">L-Stick: Steer · R2: Accelerate · L2: Brake/Reverse · R1: Handbrake · L1: Drive-by Shoot · △: Exit Vehicle · L3: Horn · R3: Look Behind</div></div></div>
       `;
+      pane.querySelector('#set-pad-sens').oninput = (e) => {
+        const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100));
+        pane.querySelector('#padSensLbl').textContent = v + '%';
+        pushConfig({ lookSensitivity: v });
+      };
       pane.querySelector('#btnVibeTest').onclick = () => {
         const gp = (navigator.getGamepads && Array.from(navigator.getGamepads()).find(Boolean));
         if (gp && gp.vibrationActuator && gp.vibrationActuator.playEffect) {
@@ -2587,6 +2604,7 @@
         if (typeof s.optimizationMode === 'boolean') appState.optimizationMode = s.optimizationMode;
         if (typeof s.motionBlur === 'boolean') appState.motionBlur = s.motionBlur;
         if (typeof s.motionBlurStrength === 'number') appState.motionBlurStrength = s.motionBlurStrength;
+        if (typeof s.lookSensitivity === 'number') appState.lookSensitivity = Math.max(20, Math.min(300, s.lookSensitivity));
         if (typeof s.showDebugHud === 'boolean') appState.showDebugHud = s.showDebugHud;
         if (typeof s.enableCheatMenu === 'boolean') appState.enableCheatMenu = s.enableCheatMenu;
         if (typeof s.resIndex === 'number') appState.resIndex = s.resIndex;

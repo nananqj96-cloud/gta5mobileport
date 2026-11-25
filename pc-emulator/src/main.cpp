@@ -308,11 +308,15 @@ struct AppState {
         s.motionBlur         = config.motionBlur;
         s.motionBlurStrength = config.motionBlurStrength;
         s.optimizationMode   = config.optimizationMode;
+        s.lookSensitivity    = config.lookSensitivity;
         s.resIndex           = config.resIndex;
         s.gta5Mode           = config.gta5Mode;
         s.isFoxxyDev         = isFoxxyDev;
         s.devGta6Enabled     = isFoxxyDev && config.devGta6Enabled;
         s.devGta6ExePath     = config.devGta6ExePath;
+        s.devFullOverlay     = config.devFullOverlay;
+        s.devFakeFpsEnabled  = config.devFakeFpsEnabled;
+        s.devFakeFpsLimit    = config.devFakeFpsLimit;
         s.customGta5PlayPath = BuildLocalGta5PlayPath(config);
     }
 
@@ -330,6 +334,7 @@ struct AppState {
                 config.motionBlur         = s.motionBlur;
                 config.motionBlurStrength = s.motionBlurStrength;
                 config.optimizationMode   = s.optimizationMode;
+                config.lookSensitivity    = std::max(20, std::min(300, s.lookSensitivity));
                 if (!s.profileName.empty() && s.profileName != signedInUser) {
                     signedInUser = s.profileName;
                 }
@@ -1387,37 +1392,50 @@ static void RenderConfigTab(AppState& app, const FontSet& fonts, SoundEngine& sf
         y += 28.0f;
 
         ImGui::SetCursorPos(ImVec2(x, y));
-        if (ImGui::Checkbox("Motion Blur (Stutter Smoothing)", &app.config.motionBlur)) {
+        if (ImGui::Checkbox("Motion Blur (Directional GPU Smoothing)", &app.config.motionBlur)) {
             changed = true;
             sfx.Play(SfxId::Click, 0.60f);
         }
-        y += 32.0f;
+        y += 30.0f;
 
         ImGui::SetCursorPos(ImVec2(x + 28.0f, y));
         ImGui::SetNextItemWidth(w - 28.0f);
         if (ImGui::SliderInt("##mblur_str", &app.config.motionBlurStrength, 0, 100, "Blur Intensity: %d%%")) {
             changed = true;
         }
-        y += 46.0f;
+        y += 40.0f;
+
+        ImGui::SetCursorPos(ImVec2(x, y));
+        ImGui::SetNextItemWidth(w - 86.0f);
+        if (ImGui::SliderInt("##look_sens", &app.config.lookSensitivity, 20, 300, "GTA V Sensitivity: %d%%")) {
+            changed = true;
+        }
+        ImGui::SetCursorPos(ImVec2(x + w - 78.0f, y));
+        if (ImGui::Button("100%", ImVec2(78.0f, 36.0f))) {
+            app.config.lookSensitivity = 100;
+            changed = true;
+            sfx.Play(SfxId::Click, 0.55f);
+        }
+        y += 44.0f;
 
         ImGui::SetCursorPos(ImVec2(x, y));
         if (ImGui::Checkbox("Real Hardware Debug HUD (CPU / GPU / VRAM / FPS)", &app.config.showDebugHud)) {
             changed = true;
             sfx.Play(SfxId::Click, 0.60f);
         }
-        y += 34.0f;
+        y += 32.0f;
 
         ImGui::SetCursorPos(ImVec2(x, y));
         if (ImGui::Checkbox("In-Game Cheat Menu Overlay (F2 / L3+R3)", &app.config.enableCheatMenu)) {
             changed = true;
             sfx.Play(SfxId::Click, 0.60f);
         }
-        y += 42.0f;
+        y += 38.0f;
 
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 54.0f), ColAlpha(ImVec4(0.03f, 0.05f, 0.09f, 0.86f), alpha), 9.0f);
-        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 54.0f), ColAlpha(Palette::Cyan, 0.26f * alpha), 9.0f);
-        dl->AddText(nullptr, 13.5f, ImVec2(x + 12.0f, y + 10.0f), ColAlpha(Palette::TextMid, 0.94f * alpha),
-                    "DualSense & Xbox controllers auto-pair in PS5/Xbox UI and GTA V.\nAll toggles stay live-synced with PS5 & Xbox Settings -> Jailbreak.",
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(ImVec4(0.03f, 0.05f, 0.09f, 0.86f), alpha), 9.0f);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(Palette::Cyan, 0.26f * alpha), 9.0f);
+        dl->AddText(nullptr, 13.0f, ImVec2(x + 12.0f, y + 8.0f), ColAlpha(Palette::TextMid, 0.94f * alpha),
+                    "Mouse & Controller sensitivity, Motion Blur & toggles sync live\nwith PS5/Xbox Settings and GTA V in-game drawer (F2 / L3+R3).",
                     nullptr, w - 24.0f);
     }
 
@@ -1480,67 +1498,76 @@ static void RenderLogTab(AppState& app, const FontSet& fonts, SoundEngine& sfx,
 static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine& sfx,
                                ParticleSystem& particles, LocalHttpServer& server,
                                SharedEmulatorState& shared, std::mutex& sharedMu,
+                               DevTargetController& devCtrl,
                                float winW, float winH, float dt, float alpha) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float marginX = std::max(32.0f, (winW - 1060.0f) * 0.5f);
     const float contentW = winW - marginX * 2.0f;
-    const float topY = static_cast<float>(kHeaderHeight) + 20.0f + (1.0f - alpha) * 14.0f;
+    const float topY = static_cast<float>(kHeaderHeight) + 18.0f + (1.0f - alpha) * 14.0f;
 
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(marginX, topY), ColAlpha(kDevGold, 0.95f * alpha),
-                "FOXXY DEVELOPER ACCESS  ·  CUSTOM GTA VI EMULATION HOOK");
+                "FOXXY DEVELOPER ACCESS  ·  GTA VI .EXE HOOK, FULL DEV OVERLAY & FAKE FPS CAP");
     ImGui::PopFont();
 
     ImGui::PushFont(fonts.title);
     dl->AddText(ImVec2(marginX, topY + 18.0f), ColAlpha(Palette::TextHi, alpha), "Developer Settings");
     ImGui::PopFont();
 
-    const float boxTop = topY + 64.0f;
-    const float boxH = std::max(400.0f, winH - boxTop - 26.0f);
+    const float boxTop = topY + 60.0f;
+    const float boxH = std::max(450.0f, winH - boxTop - 20.0f);
     ImVec2 p0(marginX, boxTop), p1(marginX + contentW, boxTop + boxH);
     DrawGlassCard(dl, p0, p1, 16.0f, kDevGold, 0.30f, alpha, false);
 
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
 
-    float x = p0.x + 28.0f;
-    float w = contentW - 56.0f;
-    float y = p0.y + 24.0f;
+    float x = p0.x + 26.0f;
+    float w = contentW - 52.0f;
+    float y = p0.y + 18.0f;
 
-    DrawStatusPill(dl, ImVec2(x, y), "OPERATOR: FOXXY  ·  ROOT DEVKIT UNLOCKED", kDevGold, alpha, true);
-    y += 44.0f;
+    const bool hasExe = IsExeFilePath(app.config.devGta6ExePath);
+    const DevTargetStatus devSt = devCtrl.GetStatus();
+
+    DrawStatusPill(dl, ImVec2(x, y), "OPERATOR: FOXXY  ·  ROOT DEVKIT", kDevGold, alpha, true);
+    if (hasExe) {
+        DrawStatusPill(dl, ImVec2(x + 275.0f, y), ".EXE TARGET ARMED (OVERLAY + FPS CAP READY)", Palette::Emerald, alpha, true);
+    } else if (!app.config.devGta6ExePath.empty()) {
+        DrawStatusPill(dl, ImVec2(x + 275.0f, y), "NON-.EXE FILE (DEV OVERLAY / FPS CAP REQUIRE .EXE)", Palette::VicePink, alpha, true);
+    }
+    y += 38.0f;
+
+    bool devChanged = false;
 
     // 1. Toggle GTA VI Emulation
     ImGui::SetCursorPos(ImVec2(x, y));
     if (ImGui::Checkbox("Enable GTA VI Emulation (Unlock GTA VI in Emulators + PS5/Xbox UI)", &app.config.devGta6Enabled)) {
-        SaveConfig(app.config);
-        app.SyncToShared(shared, sharedMu);
+        devChanged = true;
         sfx.Play(SfxId::Click, 0.75f);
         app.PushLog(std::string("[DEV] GTA VI Dev Override ") + (app.config.devGta6Enabled ? "ENABLED" : "DISABLED"));
         app.ShowToast(app.config.devGta6Enabled ? "GTA VI Emulation ENABLED for Foxxy!" : "GTA VI Emulation disabled.", kDevGold);
     }
-    y += 42.0f;
+    y += 36.0f;
 
     // 2. Custom File Picker (ANY FILE TYPE!) + Editable Path / URL Box
     ImGui::PushFont(fonts.mono);
-    dl->AddText(ImVec2(x, y), ColAlpha(Palette::TextMid, alpha), "CUSTOM GTA VI LAUNCH TARGET (ANY FILE TYPE OR URL)");
+    dl->AddText(ImVec2(x, y), ColAlpha(Palette::TextMid, alpha), "CUSTOM GTA VI LAUNCH TARGET (.EXE UNLOCKS FULLSCREEN DEV OVERLAY & FAKE FPS CAP)");
     ImGui::PopFont();
-    y += 22.0f;
+    y += 20.0f;
 
     float pathBoxW = w - 274.0f;
-    ImGui::SetCursorPos(ImVec2(x, y + 3.0f));
+    ImGui::SetCursorPos(ImVec2(x, y + 2.0f));
     ImGui::SetNextItemWidth(pathBoxW);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-    if (ImGui::InputTextWithHint("##dev_path_inp", "Browse ANY file (.exe, .bat, .mp4, .iso, .zip, .html, .png, etc.) or paste path/URL",
+    if (ImGui::InputTextWithHint("##dev_path_inp", "Browse any .exe (for Full Dev Overlay + Fake FPS Cap) or any other file/URL",
                                  app.devPathBuf, sizeof(app.devPathBuf))) {
         app.config.devGta6ExePath = app.devPathBuf;
-        SaveConfig(app.config);
-        app.SyncToShared(shared, sharedMu);
+        devChanged = true;
     }
     ImGui::PopStyleVar();
 
     ImGui::SetCursorPos(ImVec2(x + pathBoxW + 12.0f, y));
     ImGui::PushFont(fonts.bold);
-    bool browseClick = DrawNeonButton("##dev_browse", "BROWSE FILE...", ImVec2(172.0f, 44.0f),
+    bool browseClick = DrawNeonButton("##dev_browse", "BROWSE FILE...", ImVec2(172.0f, 40.0f),
                                       kDevGoldDk, kDevGold, app.btnDevBrowseHover, dt, sfx, false, alpha);
     ImGui::PopFont();
     if (browseClick) {
@@ -1549,44 +1576,147 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
             app.config.devGta6ExePath = picked;
             std::snprintf(app.devPathBuf, sizeof(app.devPathBuf), "%s", picked.c_str());
             app.config.devGta6Enabled = true;
-            SaveConfig(app.config);
-            app.SyncToShared(shared, sharedMu);
+            devChanged = true;
             app.PushLog("[DEV] Bound GTA VI custom target file: " + picked);
-            app.ShowToast("Selected GTA VI target file! Launch it from inside the PS5 or Xbox Emulator UI.", kDevGold);
+            app.ShowToast(IsExeFilePath(picked)
+                              ? "Selected .EXE! Full Dev Overlay & Fake FPS Limiter armed on launch."
+                              : "Selected GTA VI target file! Launch it from inside the PS5 or Xbox UI.",
+                          kDevGold);
         }
     }
 
     ImGui::SetCursorPos(ImVec2(x + pathBoxW + 192.0f, y));
-    if (ImGui::Button("CLEAR", ImVec2(82.0f, 44.0f))) {
+    if (ImGui::Button("CLEAR", ImVec2(82.0f, 40.0f))) {
         app.config.devGta6ExePath.clear();
         app.devPathBuf[0] = '\0';
+        devChanged = true;
+        sfx.Play(SfxId::Click, 0.60f);
+    }
+    y += 52.0f;
+
+    // 3. Two-Column DevKit Controls: Full-Screen Dev Overlay (Left) + Fake FPS Limiter (Right)
+    float halfGap = 16.0f;
+    float halfW = (w - halfGap) * 0.5f;
+    float panelH = 148.0f;
+
+    // Left Sub-Card: Full-Screen Windows GTA VI Dev Overlay (.exe only)
+    {
+        ImVec2 c0(x, y), c1(x + halfW, y + panelH);
+        dl->AddRectFilled(c0, c1, ColAlpha(ImVec4(0.05f, 0.08f, 0.14f, 0.78f), alpha), 10.0f);
+        dl->AddRect(c0, c1, ColAlpha(Palette::Cyan, 0.36f * alpha), 10.0f);
+
+        float cx = c0.x + 14.0f, cy = c0.y + 12.0f;
+        ImGui::SetCursorPos(ImVec2(cx, cy));
+        if (ImGui::Checkbox("Full-Screen GTA VI Dev Overlay (.EXE)", &app.config.devFullOverlay)) {
+            devChanged = true;
+            sfx.Play(SfxId::Click, 0.70f);
+            app.PushLog(std::string("[DEV] Full-Screen GTA VI Dev Overlay ") + (app.config.devFullOverlay ? "ON" : "OFF"));
+        }
+        cy += 34.0f;
+        dl->AddText(nullptr, 13.5f, ImVec2(cx, cy), ColAlpha(Palette::TextMid, 0.94f * alpha),
+                    "Draws a fullscreen click-through RAGE 9 DevKit HUD across Windows\n"
+                    "(Top-Left FPS/Graph/World, Left Subsystems/Log, Top-Right Real\n"
+                    "CPU/GPU/VRAM/.EXE RAM, Right Heaps/Input, Bottom Status Strip).\n"
+                    "Press F10 anytime in-game to hide or show the overlay.",
+                    nullptr, halfW - 28.0f);
+    }
+
+    // Right Sub-Card: Fake FPS Limiter (Cap Launched .EXE Max FPS)
+    {
+        ImVec2 c0(x + halfW + halfGap, y), c1(c0.x + halfW, y + panelH);
+        dl->AddRectFilled(c0, c1, ColAlpha(ImVec4(0.10f, 0.07f, 0.02f, 0.72f), alpha), 10.0f);
+        dl->AddRect(c0, c1, ColAlpha(app.config.devFakeFpsEnabled ? kDevGold : ImVec4(1, 1, 1, 0.14f), 0.55f * alpha), 10.0f);
+
+        float cx = c0.x + 14.0f, cy = c0.y + 12.0f;
+        ImGui::SetCursorPos(ImVec2(cx, cy));
+        if (ImGui::Checkbox("Fake FPS Limiter (Cap Target .EXE Max FPS)", &app.config.devFakeFpsEnabled)) {
+            devChanged = true;
+            sfx.Play(SfxId::Click, 0.70f);
+            app.PushLog(std::string("[DEV] Fake FPS Cap ") +
+                        (app.config.devFakeFpsEnabled ? ("ENABLED (" + std::to_string(app.config.devFakeFpsLimit) + " FPS max)") : "DISABLED"));
+        }
+        cy += 34.0f;
+
+        ImGui::BeginDisabled(!app.config.devFakeFpsEnabled);
+        ImGui::SetCursorPos(ImVec2(cx, cy));
+        ImGui::SetNextItemWidth(halfW - 28.0f);
+        if (ImGui::SliderInt("##dev_fake_fps", &app.config.devFakeFpsLimit, 5, 144, "Max Cap: %d FPS")) {
+            devChanged = true;
+        }
+        cy += 42.0f;
+
+        // Quick FPS cap presets
+        static const int kCaps[] = { 10, 15, 24, 30, 45, 60 };
+        float btnGap = 6.0f;
+        float btnW = (halfW - 28.0f - btnGap * 5.0f) / 6.0f;
+        ImGui::PushFont(fonts.mono);
+        for (int i = 0; i < 6; ++i) {
+            ImGui::SetCursorPos(ImVec2(cx + i * (btnW + btnGap), cy));
+            char bLbl[16];
+            std::snprintf(bLbl, sizeof(bLbl), "%d##cap", kCaps[i]);
+            if (ImGui::Button(bLbl, ImVec2(btnW, 28.0f))) {
+                app.config.devFakeFpsLimit = kCaps[i];
+                devChanged = true;
+                sfx.Play(SfxId::Click, 0.55f);
+            }
+        }
+        ImGui::PopFont();
+        ImGui::EndDisabled();
+
+        cy += 34.0f;
+        dl->AddText(nullptr, 12.5f, ImVec2(cx, cy), ColAlpha(Palette::TextDim, 0.92f * alpha),
+                    "Paces the launched .exe process so it runs at most your selected FPS.",
+                    nullptr, halfW - 28.0f);
+    }
+    y += panelH + 14.0f;
+
+    if (devChanged) {
         SaveConfig(app.config);
         app.SyncToShared(shared, sharedMu);
-        sfx.Play(SfxId::Click, 0.60f);
+        devCtrl.UpdateSettings(app.config.devFullOverlay, app.config.devFakeFpsEnabled, app.config.devFakeFpsLimit);
+    }
+
+    // 4. Live Status Strip (or Strict Console-Only Notice when idle)
+    if (devSt.running) {
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 54.0f),
+                          ColAlpha(ImVec4(0.05f, 0.16f, 0.10f, 0.72f), alpha), 10.0f);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 54.0f), ColAlpha(Palette::Emerald, 0.65f * alpha), 10.0f);
+        char runLine[256];
+        std::string capLabel = devSt.fakeFpsActive ? (std::to_string(devSt.fakeFpsLimit) + " MAX") : "OFF";
+        std::snprintf(runLine, sizeof(runLine),
+                      "ACTIVE TARGET: %s (PID %lu)  ·  OVERLAY: %s  ·  FPS CAP: %s",
+                      devSt.exeName.c_str(), static_cast<unsigned long>(devSt.pid),
+                      devSt.overlayVisible ? "FULLSCREEN ON" : "HIDDEN",
+                      capLabel.c_str());
+        ImGui::PushFont(fonts.mono);
+        dl->AddText(ImVec2(x + 14.0f, y + 19.0f), ColAlpha(Palette::TextHi, alpha), runLine);
+        ImGui::PopFont();
+
+        ImGui::SetCursorPos(ImVec2(x + w - 188.0f, y + 10.0f));
+        if (ImGui::Button("DETACH OVERLAY / CAP", ImVec2(176.0f, 34.0f))) {
+            devCtrl.StopSession();
+            sfx.Play(SfxId::Click, 0.70f);
+            app.ShowToast("Detached Dev Overlay & resumed target .exe cleanly.", Palette::Cyan);
+        }
+    } else {
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 54.0f),
+                          ColAlpha(ImVec4(0.14f, 0.10f, 0.03f, 0.55f), alpha), 10.0f);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 54.0f), ColAlpha(kDevGold, 0.42f * alpha), 10.0f);
+        dl->AddText(nullptr, 13.5f, ImVec2(x + 14.0f, y + 10.0f), ColAlpha(Palette::TextHi, 0.92f * alpha),
+                    "CONSOLE-UI LAUNCH RULE: Selected file launches ONLY when you press Play on Grand Theft Auto VI\n"
+                    "inside PS5 or Xbox UI. When a .exe is launched, the Full Dev Overlay & Fake FPS Cap engage automatically.",
+                    nullptr, w - 28.0f);
     }
     y += 66.0f;
 
-    // 3. Strict Console-Only Execution Notice
-    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 88.0f),
-                      ColAlpha(ImVec4(0.14f, 0.10f, 0.03f, 0.55f), alpha), 10.0f);
-    dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 88.0f), ColAlpha(kDevGold, 0.42f * alpha), 10.0f);
-    ImGui::PushFont(fonts.bold);
-    dl->AddText(ImVec2(x + 16.0f, y + 12.0f), ColAlpha(kDevGold, alpha), "STRICT CONSOLE-UI LAUNCH RULE (ALL FILE TYPES SUPPORTED)");
-    ImGui::PopFont();
-    dl->AddText(nullptr, 15.0f, ImVec2(x + 16.0f, y + 36.0f), ColAlpha(Palette::TextHi, 0.92f * alpha),
-                "Your selected file (any type: .exe, .bat, .lnk, .mp4, .html, .iso, .zip, etc.) will NOT launch from this tab.\n"
-                "It launches ONLY when you boot the PS5 or Xbox Emulator UI with GTA VI mounted and press Play on Grand Theft Auto VI.",
-                nullptr, w - 32.0f);
-    y += 110.0f;
-
-    // 4. Boot Console UI with GTA VI Mounted (convenience button)
+    // 5. Boot Console UI with GTA VI Mounted (convenience button)
     ImGui::SetCursorPos(ImVec2(x, y));
     ImVec2 bCenter{};
     ImGui::PushFont(fonts.bold);
     bool bootDevConsole = !app.launching && DrawNeonButton(
         "##dev_boot_console",
         app.config.consoleTarget == 0 ? "OPEN PLAYSTATION 5 UI  (GTA VI MOUNTED)" : "OPEN XBOX DASHX360 UI  (GTA VI MOUNTED)",
-        ImVec2(410.0f, 46.0f), kDevGoldDk, kDevGold, app.btnDevLaunchHover, dt, sfx,
+        ImVec2(410.0f, 44.0f), kDevGoldDk, kDevGold, app.btnDevLaunchHover, dt, sfx,
         !(app.config.devGta6Enabled && !app.config.devGta6ExePath.empty()), alpha, &bCenter);
     ImGui::PopFont();
 
@@ -1744,13 +1874,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     HwMonitor hwMonitor;
     hwMonitor.Start();
 
+    // Initialize Full-Screen Windows GTA VI Dev Overlay & Target .EXE Max-FPS Limiter
+    DevTargetController devCtrl;
+    devCtrl.Init(&hwMonitor);
+    devCtrl.UpdateSettings(app.config.devFullOverlay, app.config.devFakeFpsEnabled, app.config.devFakeFpsLimit);
+
     // Start Embedded Local Console & GTA V COOP/COEP Proxy HTTP Server
     SharedEmulatorState sharedState;
     std::mutex sharedMu;
     app.SyncToShared(sharedState, sharedMu, "gta5");
 
     LocalHttpServer httpServer;
-    bool serverOk = httpServer.Start(&hwMonitor, &sharedState, &sharedMu);
+    bool serverOk = httpServer.Start(&hwMonitor, &sharedState, &sharedMu, &devCtrl);
     app.serverPort = httpServer.Port();
 
     ShowWindow(g_hWnd, SW_SHOWDEFAULT);
@@ -1776,7 +1911,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ParticleSystem particles;
     particles.Init(static_cast<float>(winW), static_cast<float>(winH));
 
-    app.PushLog("[HYPERVISOR] ViceBox X v2.2 initialized (Full Controller UI + Real GPU Motion Blur)");
+    app.PushLog("[HYPERVISOR] ViceBox X v2.3 initialized (GTA V Sensitivity + Full GTA VI Dev Overlay + Fake FPS Cap)");
     app.PushLog("[D3D11] Active GPU: " + app.hw.gpuName);
     app.PushLog("[HWMON] Real Windows CPU/GPU/VRAM/RAM telemetry monitor started");
     if (serverOk) {
@@ -1853,7 +1988,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             } else if (app.activeTab == 2) {
                 RenderLogTab(app, fonts, sfx, disp.x, disp.y, combinedA);
             } else if (app.activeTab == 3 && app.isFoxxyDev) {
-                RenderDeveloperTab(app, fonts, sfx, particles, httpServer, sharedState, sharedMu,
+                RenderDeveloperTab(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, devCtrl,
                                    disp.x, disp.y, dt, combinedA);
             }
         }
@@ -1876,6 +2011,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     }
 
     httpServer.Stop();
+    devCtrl.Shutdown();
     hwMonitor.Shutdown();
     sfx.Shutdown();
     ImGui_ImplDX11_Shutdown();

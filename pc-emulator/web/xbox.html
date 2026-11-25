@@ -525,6 +525,7 @@
     optimizationMode: false,
     motionBlur: false,
     motionBlurStrength: 55,
+    lookSensitivity: 100,
     showDebugHud: true,
     enableCheatMenu: true,
     gta5Url: '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1',
@@ -684,7 +685,8 @@
         + '&vbx_cheats=' + (state.enableCheatMenu ? '1' : '0')
         + '&vbx_mblur=' + (state.motionBlur ? '1' : '0')
         + '&vbx_mblur_str=' + state.motionBlurStrength
-        + '&vbx_opt=' + (state.optimizationMode ? '1' : '0');
+        + '&vbx_opt=' + (state.optimizationMode ? '1' : '0')
+        + '&vbx_sens=' + state.lookSensitivity;
       setTimeout(() => { window.location.href = url; }, 350);
       return;
     }
@@ -696,7 +698,10 @@
         const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
-          openModal('GTA VI Developer Target Launched', `<p>Launched custom file:<br><code style="color:#4ade80;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Started directly from Xbox DashX360 UI.</p>`);
+          const devExtra = d.isExe
+            ? `<p style="font-size:13px;color:#4ade80;margin-top:8px;">Full-Screen Dev Overlay: <b>${d.devOverlay ? 'ACTIVE (F10 toggles)' : 'OFF'}</b> &nbsp;·&nbsp; Fake FPS Cap: <b>${d.fakeFps ? (d.fakeFpsLimit + ' FPS MAX') : 'OFF'}</b></p>`
+            : '';
+          openModal('GTA VI Developer Target Launched', `<p>Launched custom file:<br><code style="color:#4ade80;word-break:break-all;">${d.exePath}</code></p>${devExtra}<p style="font-size:13px;color:#94a3b8;">Started directly from Xbox DashX360 UI.</p>`);
         } else {
           openModal('GTA VI Launch Error', `<p>${d.error || 'Select any custom file inside Foxxy Developer Settings first.'}</p>`);
         }
@@ -932,7 +937,9 @@
         <div class="x-row"><div><div class="lbl">Motion Blur (Stutter Smoothing)</div><div class="desc">Masks frame stutters smoothly during fast driving &amp; camera movement</div></div>
           <input type="checkbox" id="xMb" ${state.motionBlur ? 'checked' : ''} style="width:22px;height:22px;"></div>
         <div class="x-row"><div><div class="lbl">Motion Blur Intensity (<span id="xMbLbl">${state.motionBlurStrength}%</span>)</div><div class="desc">Adjust temporal + velocity blur strength</div></div>
-          <input type="range" id="xMbStr" min="0" max="100" value="${state.motionBlurStrength}" style="width:200px;"></div>
+          <input type="range" id="xMbStr" min="0" max="100" step="5" value="${state.motionBlurStrength}" style="width:200px;"></div>
+        <div class="x-row"><div><div class="lbl">GTA V Camera Look Sensitivity (<span id="xSensLbl">${state.lookSensitivity}%</span>)</div><div class="desc">Controls Mouse &amp; Controller Right-Stick look speed inside GTA V (20%–300%)</div></div>
+          <input type="range" id="xSens" min="20" max="300" step="5" value="${state.lookSensitivity}" style="width:200px;"></div>
         <div class="x-row"><div><div class="lbl">Real Hardware Debug HUD (CPU / GPU / FPS)</div><div class="desc">Displays real Windows CPU %, GPU 3D %, VRAM &amp; real FPS on GTA V (toggle F3)</div></div>
           <input type="checkbox" id="xHud" ${state.showDebugHud ? 'checked' : ''} style="width:22px;height:22px;"></div>
         <div class="x-row"><div><div class="lbl">In-Game Cheat Menu (F2 / L3+R3)</div><div class="desc">Full GTA V trainer overlay (Vehicles, Weapons, God Mode, Fly, Dev Console)</div></div>
@@ -941,6 +948,7 @@
       pane.querySelector('#xOpt').onchange = (e) => { pushConfig({ optimizationMode: e.target.checked }); showToast('Optimization Mode ' + (e.target.checked ? 'ON' : 'OFF')); };
       pane.querySelector('#xMb').onchange = (e) => { pushConfig({ motionBlur: e.target.checked }); showToast('Motion Blur ' + (e.target.checked ? 'ON' : 'OFF')); };
       pane.querySelector('#xMbStr').oninput = (e) => { const v = parseInt(e.target.value, 10) || 0; pane.querySelector('#xMbLbl').textContent = v + '%'; pushConfig({ motionBlurStrength: v }); };
+      pane.querySelector('#xSens').oninput = (e) => { const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100)); pane.querySelector('#xSensLbl').textContent = v + '%'; pushConfig({ lookSensitivity: v }); };
       pane.querySelector('#xHud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
       pane.querySelector('#xCheats').onchange = (e) => pushConfig({ enableCheatMenu: e.target.checked });
     } else if (cat.id === 'pad') {
@@ -950,9 +958,12 @@
         <div class="sub">Supports Xbox Series X|S, Xbox 360, and PlayStation DualSense controllers in both DashX360 and GTA V.</div>
         <div class="x-row"><div><div class="lbl">Detected Controller</div><div class="desc">${escapeHtml(pads.length ? pads[0].id : 'Press any button on your controller to pair')}</div></div>
           <button class="x-btn" id="xVibe">Test Rumble</button></div>
+        <div class="x-row"><div><div class="lbl">GTA V Look Sensitivity (<span id="xPadSensLbl">${state.lookSensitivity}%</span>)</div><div class="desc">Adjusts Right-Stick &amp; Mouse camera speed in GTA V (also tunable live with F6 / F7 or Cheat Drawer)</div></div>
+          <input type="range" id="xPadSens" min="20" max="300" step="5" value="${state.lookSensitivity}" style="width:200px;"></div>
         <div class="x-row"><div><div class="lbl">DashX360 Navigation</div><div class="desc">D-Pad / L-Stick Navigate · A Select · B Back · LB / RB Switch Tabs &amp; Blades · Y Xbox Guide</div></div></div>
         <div class="x-row"><div><div class="lbl">GTA V Default Controls</div><div class="desc">RT Shoot / Gas · LT Aim / Brake · RB Cover / Handbrake · LB Weapon Wheel · A Sprint · X Jump · B Reload · Y Enter/Exit Vehicle · LS+RS Cheat Menu</div></div></div>
       `;
+      pane.querySelector('#xPadSens').oninput = (e) => { const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100)); pane.querySelector('#xPadSensLbl').textContent = v + '%'; pushConfig({ lookSensitivity: v }); };
       pane.querySelector('#xVibe').onclick = () => {
         const gp = navigator.getGamepads && Array.from(navigator.getGamepads()).find(Boolean);
         if (gp && gp.vibrationActuator && gp.vibrationActuator.playEffect) {
@@ -1798,6 +1809,7 @@
         if (typeof s.optimizationMode === 'boolean') state.optimizationMode = s.optimizationMode;
         if (typeof s.motionBlur === 'boolean') state.motionBlur = s.motionBlur;
         if (typeof s.motionBlurStrength === 'number') state.motionBlurStrength = s.motionBlurStrength;
+        if (typeof s.lookSensitivity === 'number') state.lookSensitivity = Math.max(20, Math.min(300, s.lookSensitivity));
         if (typeof s.showDebugHud === 'boolean') state.showDebugHud = s.showDebugHud;
         if (typeof s.enableCheatMenu === 'boolean') state.enableCheatMenu = s.enableCheatMenu;
         if (s.gta5Url) state.gta5Url = s.gta5Url;

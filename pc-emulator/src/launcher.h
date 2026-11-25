@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -46,6 +47,7 @@ struct EmulatorConfig {
     bool motionBlur         = false;
     int  motionBlurStrength = 55;
     bool optimizationMode   = false;
+    int  lookSensitivity    = 100; // 20..300% (Mouse & Controller GTA V camera sensitivity)
 
     // Session & Profile
     bool rememberSession = true;
@@ -53,8 +55,11 @@ struct EmulatorConfig {
     std::string psPlusTier = "Extra";
 
     // Foxxy Developer Mode (only accessible when signed in as "Foxxy")
-    bool devGta6Enabled = false;
+    bool devGta6Enabled     = false;
     std::string devGta6ExePath;
+    bool devFullOverlay     = true;  // Full-screen Windows Dev Overlay for launched GTA VI .exe
+    bool devFakeFpsEnabled  = false; // Cap launched GTA VI .exe max FPS
+    int  devFakeFpsLimit    = 30;    // Target Max FPS (5..144)
 
     // Phase 2 staging directory
     std::string gta6TexturePackDir = ".\\packs\\gta6_vice";
@@ -108,6 +113,7 @@ inline std::string BuildLocalGta5PlayPath(const EmulatorConfig& cfg) {
     url += "&scale=" + std::string(scaleBuf);
     url += "&shadows=" + std::string(shVal >= 0 ? "1" : "0");
     url += "&fixed=1";
+    url += "&vbx_sens=" + std::to_string(std::max(20, std::min(300, cfg.lookSensitivity)));
 
     if (cfg.gta5Mode == 1) {
         url += "&mode=story";
@@ -329,9 +335,13 @@ inline void SaveConfig(const EmulatorConfig& cfg) {
     f << "motionBlur=" << (cfg.motionBlur ? 1 : 0) << "\n";
     f << "motionBlurStrength=" << cfg.motionBlurStrength << "\n";
     f << "optimizationMode=" << (cfg.optimizationMode ? 1 : 0) << "\n";
+    f << "lookSensitivity=" << cfg.lookSensitivity << "\n";
     f << "psPlusTier=" << cfg.psPlusTier << "\n";
     f << "devGta6Enabled=" << (cfg.devGta6Enabled ? 1 : 0) << "\n";
     f << "devGta6ExePath=" << cfg.devGta6ExePath << "\n";
+    f << "devFullOverlay=" << (cfg.devFullOverlay ? 1 : 0) << "\n";
+    f << "devFakeFpsEnabled=" << (cfg.devFakeFpsEnabled ? 1 : 0) << "\n";
+    f << "devFakeFpsLimit=" << cfg.devFakeFpsLimit << "\n";
     f << "rememberSession=" << (cfg.rememberSession ? 1 : 0) << "\n";
     if (cfg.rememberSession && !cfg.savedGamertag.empty()) {
         f << "gamertag=" << cfg.savedGamertag << "\n";
@@ -363,9 +373,13 @@ inline void LoadConfig(EmulatorConfig& cfg) {
             else if (k == "motionBlur") cfg.motionBlur = (std::stoi(v) != 0);
             else if (k == "motionBlurStrength") cfg.motionBlurStrength = std::stoi(v);
             else if (k == "optimizationMode") cfg.optimizationMode = (std::stoi(v) != 0);
+            else if (k == "lookSensitivity") cfg.lookSensitivity = std::max(20, std::min(300, std::stoi(v)));
             else if (k == "psPlusTier") cfg.psPlusTier = v;
             else if (k == "devGta6Enabled") cfg.devGta6Enabled = (std::stoi(v) != 0);
             else if (k == "devGta6ExePath") cfg.devGta6ExePath = v;
+            else if (k == "devFullOverlay") cfg.devFullOverlay = (std::stoi(v) != 0);
+            else if (k == "devFakeFpsEnabled") cfg.devFakeFpsEnabled = (std::stoi(v) != 0);
+            else if (k == "devFakeFpsLimit") cfg.devFakeFpsLimit = std::max(5, std::min(144, std::stoi(v)));
             else if (k == "rememberSession") cfg.rememberSession = (std::stoi(v) != 0);
             else if (k == "gamertag") cfg.savedGamertag = v;
         } catch (...) {}

@@ -20,6 +20,7 @@
 
 #include "embedded_assets.h"
 #include "hw_monitor.h"
+#include "dev_overlay.h"
 
 namespace vicebox {
 
@@ -33,6 +34,7 @@ struct SharedEmulatorState {
     bool        motionBlur         = false;
     int         motionBlurStrength = 55;
     bool        optimizationMode   = false;
+    int         lookSensitivity    = 100;      // 20..300%
     int         resIndex           = 2;        // 0:1280x720, 1:1600x900, 2:1920x1080, 3:2560x1440, 4:3840x2160
     int         gta5Mode           = 0;        // 0:Balanced 60, 1:Ultra Visuals, 2:Performance Boost
 
@@ -40,6 +42,9 @@ struct SharedEmulatorState {
     bool        isFoxxyDev         = false;
     bool        devGta6Enabled     = false;
     std::string devGta6ExePath;
+    bool        devFullOverlay     = true;
+    bool        devFakeFpsEnabled  = false;
+    int         devFakeFpsLimit    = 30;
     std::string customGta5PlayPath;
     bool        configDirtyFromWeb = false;
 
@@ -67,11 +72,12 @@ public:
     LocalHttpServer() = default;
     ~LocalHttpServer() { Stop(); }
 
-    bool Start(HwMonitor* hw, SharedEmulatorState* sharedState, std::mutex* stateMu) {
+    bool Start(HwMonitor* hw, SharedEmulatorState* sharedState, std::mutex* stateMu, DevTargetController* devCtrl = nullptr) {
         if (running_.load()) return true;
         hw_ = hw;
         shared_ = sharedState;
         stateMu_ = stateMu;
+        devCtrl_ = devCtrl;
 
         WSADATA wsa{};
         if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
@@ -503,12 +509,16 @@ private:
             << "\"motionBlur\":" << (st.motionBlur ? "true" : "false") << ","
             << "\"motionBlurStrength\":" << st.motionBlurStrength << ","
             << "\"optimizationMode\":" << (st.optimizationMode ? "true" : "false") << ","
+            << "\"lookSensitivity\":" << st.lookSensitivity << ","
             << "\"resIndex\":" << st.resIndex << ","
             << "\"gta5Mode\":" << st.gta5Mode << ","
             << "\"gta5Url\":\"" << EscapeJson(st.BuildGta5PlayUrl()) << "\","
             << "\"isFoxxyDev\":" << (st.isFoxxyDev ? "true" : "false") << ","
             << "\"devGta6Enabled\":" << (st.devGta6Enabled ? "true" : "false") << ","
-            << "\"devGta6ExePath\":\"" << EscapeJson(st.devGta6ExePath) << "\""
+            << "\"devGta6ExePath\":\"" << EscapeJson(st.devGta6ExePath) << "\","
+            << "\"devFullOverlay\":" << (st.devFullOverlay ? "true" : "false") << ","
+            << "\"devFakeFpsEnabled\":" << (st.devFakeFpsEnabled ? "true" : "false") << ","
+            << "\"devFakeFpsLimit\":" << st.devFakeFpsLimit
             << "}";
         SendJson(client, oss.str());
     }
@@ -532,6 +542,9 @@ private:
             shared_->motionBlurStrength = std::max(0, std::min(100, iVal));
         }
         if (ExtractJsonBool(body, "optimizationMode", bVal)) shared_->optimizationMode = bVal;
+        if (ExtractJsonInt(body, "lookSensitivity", iVal)) {
+            shared_->lookSensitivity = std::max(20, std::min(300, iVal));
+        }
         if (ExtractJsonInt(body, "resIndex", iVal)) {
             shared_->resIndex = std::max(0, std::min(4, iVal));
         }
@@ -557,15 +570,40 @@ private:
     void HandleLaunchCustomExe(SOCKET client) {
         bool allowed = false;
         std::string targetPath;
+        bool devFullOverlay = true;
+        bool devFakeFpsEnabled = false;
+        int devFakeFpsLimit = 30;
         {
             std::lock_guard<std::mutex> lk(*stateMu_);
             allowed = shared_->isFoxxyDev && shared_->devGta6Enabled &&
                       shared_->emulatedGame == "gta6" && !shared_->devGta6ExePath.empty();
             targetPath = shared_->devGta6ExePath;
+            devFullOverlay = shared_->devFullOverlay;
+            devFakeFpsEnabled = shared_->devFakeFpsEnabled;
+            devFakeFpsLimit = shared_->devFakeFpsLimit;
         }
 
         if (!allowed) {
             SendJson(client, "{\"ok\":false,\"error\":\"Developer Mode (Foxxy) + Custom GTA VI file not enabled.\"}");
+            return;
+        }
+
+        // If the selected target is a Windows .exe, launch via DevTargetController so the
+        // Full-Screen Windows Dev Overlay & Fake Max-FPS Limiter attach cleanly!
+        if (IsExeFilePath(targetPath) && devCtrl_) {
+            devCtrl_->UpdateSettings(devFullOverlay, devFakeFpsEnabled, devFakeFpsLimit);
+            std::string err;
+            if (!devCtrl_->LaunchExe(targetPath, err)) {
+                SendJson(client, "{\"ok\":false,\"error\":\"" + EscapeJson(err) + "\"}");
+                return;
+            }
+            std::ostringstream oss;
+            oss << "{\"ok\":true,\"exePath\":\"" << EscapeJson(targetPath) << "\""
+                << ",\"isExe\":true"
+                << ",\"devOverlay\":" << (devFullOverlay ? "true" : "false")
+                << ",\"fakeFps\":" << (devFakeFpsEnabled ? "true" : "false")
+                << ",\"fakeFpsLimit\":" << devFakeFpsLimit << "}";
+            SendJson(client, oss.str());
             return;
         }
 
@@ -822,6 +860,7 @@ private:
     HwMonitor* hw_ = nullptr;
     SharedEmulatorState* shared_ = nullptr;
     std::mutex* stateMu_ = nullptr;
+    DevTargetController* devCtrl_ = nullptr;
 
     HINTERNET hSession_ = nullptr;
     SOCKET listenSock_ = INVALID_SOCKET;
