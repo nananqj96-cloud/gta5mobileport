@@ -1,0 +1,57 @@
+name: Build PS5 Mobile APK
+
+on:
+  push:
+    branches: ["main", "arena/*"]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Locate Android SDK Build-Tools & Platform 34
+        id: sdk
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT_DIR="$(ls -d "$SDK/build-tools/34."* 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$BT_DIR" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" "build-tools;34.0.0" "platforms;android-34"
+            BT_DIR="$SDK/build-tools/34.0.0"
+          fi
+          if [ ! -f "$SDK/platforms/android-34/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34"
+          fi
+          echo "sdk=$SDK" >> "$GITHUB_OUTPUT"
+          echo "build_tools=$BT_DIR" >> "$GITHUB_OUTPUT"
+          echo "android_jar=$SDK/platforms/android-34/android.jar" >> "$GITHUB_OUTPUT"
+
+      - name: Build Signed PS5 Mobile APK
+        env:
+          ANDROID_SDK_ROOT: ${{ steps.sdk.outputs.sdk }}
+          BUILD_TOOLS: ${{ steps.sdk.outputs.build_tools }}
+          ANDROID_JAR: ${{ steps.sdk.outputs.android_jar }}
+        run: |
+          chmod +x scripts/build-apk.sh
+          ./scripts/build-apk.sh releases/PS5-Mobile.apk
+
+      - name: Verify APK Manifest & JS Bridge
+        env:
+          BUILD_TOOLS: ${{ steps.sdk.outputs.build_tools }}
+        run: |
+          "$BUILD_TOOLS/aapt2" dump badging releases/PS5-Mobile.apk
+          node --check app/src/main/assets/mobile_bridge.js
+
+      - name: Upload CI-Compiled APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS5-Mobile-APK
+          path: releases/PS5-Mobile.apk

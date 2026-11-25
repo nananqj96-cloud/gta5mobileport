@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PS5 System Software</title>
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    pointer-events: none !important;
+    touch-action: none !important;
+  }
+  html, body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #060914;
+    color: #f9f9f9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Full-bleed PS5 animated background (from khaledOghli/PS5_Online Background.module.css) */
+  .ps_background {
+    position: fixed;
+    inset: 0;
+    background-image: url('./images/gta5_bg.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 0;
+    animation: animate_bg 1.1s cubic-bezier(0.175, 0.885, 0.32, 1) forwards;
+    transition: filter 0.35s ease, opacity 0.35s ease;
+  }
+  .ps_background::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(4, 7, 16, 0.88) 0%, rgba(5, 9, 22, 0.56) 44%, rgba(5, 9, 22, 0.25) 75%, rgba(4, 7, 16, 0.72) 100%),
+      linear-gradient(180deg, rgba(4, 7, 16, 0.76) 0%, rgba(4, 7, 16, 0.14) 36%, rgba(4, 7, 16, 0.82) 100%);
+  }
+  .ps_background.media_mode {
+    filter: blur(14px) brightness(0.45) saturate(1.2);
+  }
+  @keyframes animate_bg {
+    0% { transform: scale(1.28); opacity: 0.4; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  /* Ambient PS5 floating particles */
+  .ps_particles {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    background-image:
+      radial-gradient(2px 2px at 18% 28%, rgba(120, 185, 255, 0.45), transparent),
+      radial-gradient(1.5px 1.5px at 72% 22%, rgba(255, 255, 255, 0.38), transparent),
+      radial-gradient(2px 2px at 42% 76%, rgba(90, 165, 255, 0.32), transparent),
+      radial-gradient(1.5px 1.5px at 86% 64%, rgba(255, 255, 255, 0.28), transparent);
+    opacity: 0.8;
+  }
+
+  /* Main PS5 stage */
+  #root {
+    position: relative;
+    z-index: 2;
+    width: 100vw;
+    height: 100vh;
+    padding: 0 5.5vw;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  /* Header (adapted from PS5_Online Header.module.css) */
+  .ps_header {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 8px;
+  }
+  .ps_header_left ul, .ps_header_right ul {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .nav_item {
+    position: relative;
+    font-size: 17px;
+    font-weight: 300;
+    color: rgba(245, 248, 255, 0.72);
+    padding: 6px 14px;
+    border-radius: 22px;
+    transition: all 0.18s ease;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .nav_item.tab_active {
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .nav_item.focused {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 0 0 2px #ffffff, 0 0 18px rgba(74, 158, 255, 0.55);
+  }
+  .icon_pill {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+  }
+  .icon_pill svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
+  .ps_profile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ps_avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0070d1, #38bdf8);
+    border: 1.5px solid rgba(255,255,255,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: #fff;
+  }
+  .ps_online_dot {
+    position: absolute;
+    left: 22px;
+    bottom: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #10b981;
+    border: 1.5px solid #060914;
+  }
+  .ps_time {
+    font-size: 16px;
+    font-weight: 300;
+    letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.92);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Games strip (adapted from PS5_Online GamesItem.module.css — ONLY GTA V!) */
+  .ps_games_section {
+    margin-top: 2px;
+  }
+  .ps_games_container {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    padding: 4px 0;
+  }
+  .ps_game_slot {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: 14px;
+    animation: revealLeft 0.35s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+  }
+  @keyframes revealLeft {
+    0% { opacity: 0; transform: translateX(26px) scale(0.92); }
+    100% { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  .ps_game_tile_wrap {
+    position: relative;
+    width: 96px;
+    height: 96px;
+    transition: all 0.24s cubic-bezier(0.2, 0.85, 0.25, 1);
+  }
+  .ps_game_slot.selected .ps_game_tile_wrap {
+    width: 122px;
+    height: 122px;
+  }
+  .ps_game_tile {
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #0d1326;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+    transition: border-radius 0.24s ease;
+  }
+  .ps_game_slot.selected .ps_game_tile {
+    border-radius: 22px;
+  }
+  .ps_game_tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .ps_game_border {
+    position: absolute;
+    inset: -4px;
+    border-radius: 25px;
+    border: 2.5px solid rgba(255, 255, 255, 0.96);
+    box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.4), 0 0 22px rgba(255, 255, 255, 0.42), 0 0 38px rgba(0, 112, 209, 0.55);
+    opacity: 0;
+    transform: scale(0.94);
+    transition: all 0.22s ease;
+  }
+  .ps_game_slot.focused .ps_game_border {
+    opacity: 1;
+    transform: scale(1);
+    animation: borderPulse 2.4s ease-in-out infinite;
+  }
+  .ps_game_slot.selected:not(.focused) .ps_game_border {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  @keyframes borderPulse {
+    0%, 100% { box-shadow: 0 0 18px rgba(255, 255, 255, 0.45), 0 0 32px rgba(0, 112, 209, 0.45); }
+    50% { box-shadow: 0 0 26px rgba(255, 255, 255, 0.78), 0 0 46px rgba(56, 189, 248, 0.75); }
+  }
+  .ps_game_meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .ps_gen_badge {
+    padding: 3px 9px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #060914;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+  }
+  .ps_game_title {
+    font-size: 18px;
+    font-weight: 400;
+    color: #ffffff;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+    letter-spacing: 0.3px;
+  }
+
+  /* Lower hero row: GameInfo left + Trophies right (from PS5_Online GameInfo & Trophies) */
+  .ps_hero_row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-top: auto;
+    padding-bottom: 42px;
+  }
+  .ps_game_info {
+    max-width: 55%;
+    animation: revealBottom 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes revealBottom {
+    0% { opacity: 0; transform: translateY(34px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  .gta_wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .gta_wordmark_main {
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: -0.6px;
+    text-transform: uppercase;
+    color: #ffffff;
+    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.9);
+    line-height: 1.0;
+  }
+  .gta_wordmark_v {
+    font-size: 36px;
+    font-weight: 900;
+    background: linear-gradient(180deg, #52e58d 0%, #10b981 55%, #d9b44a 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 3px 12px rgba(16, 185, 129, 0.45));
+  }
+  .gta_edition_tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    color: #93c5fd;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .ps_game_desc {
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(235, 242, 255, 0.84);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+    margin-bottom: 14px;
+    max-width: 440px;
+  }
+  .ps_actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* PS5 Play Button + Shine Effect (from PS5_Online index.css) */
+  .play_btn {
+    position: relative;
+    width: 210px;
+    height: 44px;
+    border-radius: 26px;
+    background: rgba(255, 255, 255, 0.20);
+    backdrop-filter: blur(8px);
+    border: none;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: transform 0.16s ease, background 0.16s ease;
+  }
+  .more_btn {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.20);
+    backdrop-filter: blur(8px);
+    border: none;
+    color: #ffffff;
+    font-size: 19px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 2px;
+    transition: transform 0.16s ease, background 0.16s ease;
+  }
+  .shine_effect::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border: 2.5px solid #ffffff;
+    border-radius: inherit;
+    opacity: 0;
+    transform: scale(0.95);
+    transition: opacity 180ms ease, transform 180ms ease;
+    background-image: linear-gradient(-45deg, transparent 30%, rgba(255, 255, 255, 0.35), transparent 70%);
+    background-size: 600%;
+    animation: animation-shine 4.5s linear infinite;
+    box-shadow: 0 0 22px rgba(74, 158, 255, 0.65);
+  }
+  .shine_effect.focused {
+    background: rgba(255, 255, 255, 0.30);
+    transform: scale(1.03);
+  }
+  .shine_effect.focused::before {
+    opacity: 1;
+    transform: scale(1);
+  }
+  @keyframes animation-shine {
+    0% { background-position: 100%; }
+    35% { background-position: 0%; }
+    100% { background-position: 0%; }
+  }
+
+  .profile_hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: rgba(186, 214, 255, 0.78);
+    letter-spacing: 0.4px;
+  }
+
+  /* Trophies card (adapted from PS5_Online Trophies.css) */
+  .trophies_container {
+    width: 270px;
+    border-radius: 12px;
+    padding: 12px 16px;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(125deg, rgba(24, 32, 62, 0.88), rgba(20, 26, 48, 0.86), rgba(0, 112, 209, 0.38));
+    border: 1px solid rgba(147, 197, 253, 0.24);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+  }
+  .trophies_header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .trophies_stat span {
+    display: block;
+    font-size: 11px;
+    color: rgba(210, 224, 255, 0.75);
+    letter-spacing: 0.5px;
+  }
+  .trophies_stat h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .trophies_body {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .trophy_item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .trophy_item img {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+  }
+  .trophy_item span {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  /* Media tab view */
+  #media_panel {
+    display: none;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    gap: 10px;
+    padding-bottom: 50px;
+  }
+  #media_panel.visible { display: flex; }
+  .media_card {
+    background: rgba(12, 18, 36, 0.78);
+    border: 1px solid rgba(147, 197, 253, 0.24);
+    border-radius: 18px;
+    padding: 24px 36px;
+    max-width: 440px;
+  }
+  .media_card h2 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  .media_card p { font-size: 13px; color: rgba(210, 224, 255, 0.76); line-height: 1.5; }
+
+  /* More options controller sub-menu */
+  #options_modal {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgba(3, 6, 16, 0.72);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  #options_modal.visible { display: flex; }
+  .options_box {
+    width: 340px;
+    background: linear-gradient(160deg, rgba(16, 24, 48, 0.96), rgba(8, 12, 26, 0.96));
+    border: 1px solid rgba(147, 197, 253, 0.34);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.8);
+  }
+  .options_title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: #93c5fd;
+    margin-bottom: 10px;
+    padding-left: 8px;
+  }
+  .opt_row {
+    padding: 11px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(235, 242, 255, 0.82);
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.14s ease;
+  }
+  .opt_row span.sub {
+    font-size: 11px;
+    color: rgba(147, 197, 253, 0.78);
+  }
+  .opt_row.focused {
+    background: rgba(0, 112, 209, 0.35);
+    color: #ffffff;
+    box-shadow: 0 0 0 2px #ffffff, 0 0 18px rgba(0, 112, 209, 0.6);
+  }
+
+  /* Bottom DualSense legend */
+  .ps_legend {
+    position: fixed;
+    left: 5.5vw;
+    bottom: 10px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 11px;
+    color: rgba(226, 236, 255, 0.78);
+    letter-spacing: 0.4px;
+  }
+  .ps_legend b {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    margin-right: 5px;
+    font-size: 10px;
+    color: #fff;
+  }
+
+  /* Boot transition splash */
+  #boot_splash {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: radial-gradient(circle at 50% 45%, #0c1b3d 0%, #03060f 75%);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  #boot_splash.visible { display: flex; }
+  .boot_bar_track {
+    width: 240px;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+  }
+  .boot_bar_fill {
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(90deg, #0070d1, #60a5fa, #ffffff);
+    animation: bootSlide 1.1s ease-in-out infinite;
+  }
+  @keyframes bootSlide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(260%); }
+  }
+  #boot_label {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.8px;
+    color: #e2ecff;
+  }
+</style>
+</head>
+<body>
+  <div id="ps_bg" class="ps_background"></div>
+  <div class="ps_particles"></div>
+
+  <div id="root">
+    <!-- Top PS5 Header -->
+    <header class="ps_header">
+      <div class="ps_header_left">
+        <ul>
+          <li id="nav-games" class="nav_item tab_active">Games</li>
+          <li id="nav-media" class="nav_item">Media</li>
+        </ul>
+      </div>
+      <div class="ps_header_right">
+        <ul>
+          <li id="nav-settings" class="nav_item icon_pill" title="Settings">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.49.49 0 0 0-.49-.42h-3.84a.49.49 0 0 0-.49.42l-.36 2.54c-.58.23-1.12.55-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.4.3.6.22l2.39-.96c.5.39 1.04.71 1.62.94l.36 2.54c.05.24.25.42.49.42h3.84c.24 0 .44-.18.49-.42l.36-2.54c.58-.23 1.12-.55 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+          </li>
+          <li>
+            <div class="ps_profile">
+              <div class="ps_avatar">P5</div>
+              <span class="ps_online_dot"></span>
+            </div>
+          </li>
+          <li id="ps-clock" class="ps_time">12:00 PM</li>
+        </ul>
+      </div>
+    </header>
+
+    <!-- Games Home View (ONLY Grand Theft Auto V!) -->
+    <main id="games_panel" style="display:flex; flex-direction:column; flex:1;">
+      <section class="ps_games_section">
+        <div class="ps_games_container">
+          <div id="tile-gta5" class="ps_game_slot selected">
+            <div class="ps_game_tile_wrap">
+              <div class="ps_game_tile">
+                <img src="./images/gta5_thumb.jpg" alt="Grand Theft Auto V">
+              </div>
+              <div class="ps_game_border"></div>
+            </div>
+            <div class="ps_game_meta">
+              <span class="ps_gen_badge">PS5</span>
+              <span class="ps_game_title">Grand Theft Auto V</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ps_hero_row">
+        <div class="ps_game_info">
+          <span class="gta_edition_tag">PS5 · WebGPU Hardware Runtime</span>
+          <div class="gta_wordmark">
+            <span class="gta_wordmark_main">Grand Theft Auto</span>
+            <span class="gta_wordmark_v">V</span>
+          </div>
+          <p class="ps_game_desc">
+            Experience Los Santos and Blaine County in Story Mode, Sandbox Free Roam, or Multiplayer with custom mobile DualSense controls and developer trainer tools.
+          </p>
+          <div class="ps_actions">
+            <button id="btn-play" class="play_btn shine_effect focused">▶&nbsp; Play Game</button>
+            <button id="btn-more" class="more_btn shine_effect">•••</button>
+          </div>
+          <div id="profile-summary" class="profile_hint">Graphics: Low · Render Distance: Default · Controller Navigation Only</div>
+        </div>
+
+        <div class="trophies_container">
+          <div class="trophies_header">
+            <div class="trophies_stat">
+              <span>Progress</span>
+              <h3>62%</h3>
+            </div>
+            <div class="trophies_stat">
+              <span>Earned</span>
+              <h3>34/50</h3>
+            </div>
+          </div>
+          <div class="trophies_body">
+            <div class="trophy_item">
+              <img src="./images/gold_trophy.png" alt="Gold">
+              <span>2</span>
+            </div>
+            <div class="trophy_item">
+              <img src="./images/silver_trophy.png" alt="Silver">
+              <span>8</span>
+            </div>
+            <div class="trophy_item">
+              <img src="./images/bronze_trophy.png" alt="Bronze">
+              <span>24</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Media Tab View -->
+    <section id="media_panel">
+      <div class="media_card">
+        <h2>PS5 Media</h2>
+        <p>Use the controller D-Pad Left or press Circle (○) to return to Games and launch Grand Theft Auto V.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- Bottom Controller Prompt Legend -->
+  <div class="ps_legend">
+    <span><b>✛</b>Navigate</span>
+    <span><b>✕</b>Select</span>
+    <span><b>○</b>Back</span>
+    <span><b>⚙</b>Settings / Stats</span>
+  </div>
+
+  <!-- Controller-only Launch Options Modal -->
+  <div id="options_modal">
+    <div class="options_box">
+      <div class="options_title">Grand Theft Auto V · Options</div>
+      <div class="opt_row focused" data-opt="default"><span>Play Game (Title Screen)</span><span class="sub">Standard</span></div>
+      <div class="opt_row" data-opt="story"><span>Launch Story Mode</span><span class="sub">Prologue / Save</span></div>
+      <div class="opt_row" data-opt="sandbox5"><span>Launch Sandbox · GTA V Map</span><span class="sub">All Weapons</span></div>
+      <div class="opt_row" data-opt="sandbox6"><span>Launch Sandbox · GTA VI Map</span><span class="sub">env_test</span></div>
+      <div class="opt_row" data-opt="settings"><span>PS5 System Settings &amp; Stats</span><span class="sub">FPS / GPU / LOD</span></div>
+    </div>
+  </div>
+
+  <!-- Launch Splash -->
+  <div id="boot_splash">
+    <div class="gta_wordmark">
+      <span class="gta_wordmark_main" style="font-size:24px;">Grand Theft Auto</span>
+      <span class="gta_wordmark_v" style="font-size:28px;">V</span>
+    </div>
+    <div class="boot_bar_track"><div class="boot_bar_fill"></div></div>
+    <div id="boot_label">Starting PS5 WebGPU Runtime...</div>
+  </div>
+
+  <!-- Authentic PS5 Sounds -->
+  <audio id="snd-nav" src="./sounds/nav.mp3" preload="auto"></audio>
+  <audio id="snd-enter" src="./sounds/enter.mp3" preload="auto"></audio>
+  <audio id="snd-back" src="./sounds/back.mp3" preload="auto"></audio>
+  <audio id="snd-menu-on" src="./sounds/menu_on.mp3" preload="auto"></audio>
+
+<script>
+(function() {
+  'use strict';
+
+  // Block ALL direct pointer/touch events on the PS5 UI so only controller controls work
+  ['touchstart','touchmove','touchend','mousedown','mouseup','click','pointerdown','pointerup'].forEach(function(ev) {
+    window.addEventListener(ev, function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }, { capture: true, passive: false });
+  });
+
+  // Live PS5 clock
+  function updateClock() {
+    var d = new Date();
+    var h = d.getHours();
+    var m = d.getMinutes();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    document.getElementById('ps-clock').textContent = h + ':' + (m < 10 ? '0' + m : m) + ' ' + ampm;
+  }
+  updateClock();
+  setInterval(updateClock, 15000);
+
+  // Live UI FPS telemetry for Android Stats Viewer
+  var fCount = 0, fStart = performance.now();
+  function fpsTick(now) {
+    fCount++;
+    if (now - fStart >= 800) {
+      var fps = Math.round((fCount * 1000) / (now - fStart));
+      fCount = 0; fStart = now;
+      try {
+        if (window.GtaAndroidBridge && window.GtaAndroidBridge.onFps) {
+          window.GtaAndroidBridge.onFps(fps);
+        }
+      } catch (e) {}
+    }
+    requestAnimationFrame(fpsTick);
+  }
+  requestAnimationFrame(fpsTick);
+
+  function playSnd(id) {
+    try {
+      var a = document.getElementById(id);
+      if (a) { a.currentTime = 0; a.volume = 0.7; a.play().catch(function(){}); }
+    } catch (e) {}
+  }
+
+  // Focus state machine:
+  // zone: 'header' (idx: 0=Games, 1=Media, 2=Settings)
+  //     | 'games'  (idx: 0=GTA V tile)
+  //     | 'actions' (idx: 0=Play Game, 1=More Options)
+  //     | 'modal'  (idx: 0..4 in options_modal)
+  var state = {
+    tab: 'games',
+    zone: 'actions',
+    idx: 0,
+    modalOpen: false,
+    modalIdx: 0,
+    launching: false
+  };
+
+  var headerIds = ['nav-games', 'nav-media', 'nav-settings'];
+  var actionIds = ['btn-play', 'btn-more'];
+  var modalRows = Array.prototype.slice.call(document.querySelectorAll('#options_modal .opt_row'));
+
+  function render() {
+    // Clear focus classes
+    headerIds.forEach(function(id) { document.getElementById(id).classList.remove('focused'); });
+    actionIds.forEach(function(id) { document.getElementById(id).classList.remove('focused'); });
+    document.getElementById('tile-gta5').classList.remove('focused');
+
+    document.getElementById('nav-games').classList.toggle('tab_active', state.tab === 'games');
+    document.getElementById('nav-media').classList.toggle('tab_active', state.tab === 'media');
+    document.getElementById('games_panel').style.display = state.tab === 'games' ? 'flex' : 'none';
+    document.getElementById('media_panel').classList.toggle('visible', state.tab === 'media');
+    document.getElementById('ps_bg').classList.toggle('media_mode', state.tab === 'media');
+
+    var modal = document.getElementById('options_modal');
+    modal.classList.toggle('visible', state.modalOpen);
+    if (state.modalOpen) {
+      modalRows.forEach(function(el, i) { el.classList.toggle('focused', i === state.modalIdx); });
+      return;
+    }
+
+    if (state.zone === 'header') {
+      document.getElementById(headerIds[state.idx]).classList.add('focused');
+    } else if (state.zone === 'games') {
+      document.getElementById('tile-gta5').classList.add('focused');
+    } else if (state.zone === 'actions') {
+      document.getElementById(actionIds[state.idx]).classList.add('focused');
+    }
+  }
+
+  function triggerLaunch(mode) {
+    if (state.launching) return;
+    state.launching = true;
+    state.modalOpen = false;
+    render();
+    playSnd('snd-enter');
+    var labels = {
+      default: 'Starting Grand Theft Auto V...',
+      story: 'Launching Story Mode...',
+      sandbox5: 'Launching Sandbox · Los Santos...',
+      sandbox6: 'Launching Sandbox · GTA VI Map...'
+    };
+    document.getElementById('boot_label').textContent = labels[mode] || 'Starting Grand Theft Auto V...';
+    document.getElementById('boot_splash').classList.add('visible');
+    setTimeout(function() {
+      try {
+        if (window.GtaAndroidBridge && window.GtaAndroidBridge.launchGtaGame) {
+          window.GtaAndroidBridge.launchGtaGame(mode || 'default');
+        }
+      } catch (e) {}
+    }, 320);
+  }
+
+  window.__ps5Nav = {
+    move: function(dir) {
+      if (state.launching) return;
+      if (state.modalOpen) {
+        if (dir === 'up') {
+          state.modalIdx = (state.modalIdx + modalRows.length - 1) % modalRows.length;
+          playSnd('snd-nav');
+        } else if (dir === 'down') {
+          state.modalIdx = (state.modalIdx + 1) % modalRows.length;
+          playSnd('snd-nav');
+        }
+        render();
+        return;
+      }
+
+      if (state.zone === 'header') {
+        if (dir === 'left' && state.idx > 0) {
+          state.idx--;
+          if (state.idx === 0) state.tab = 'games';
+          else if (state.idx === 1) state.tab = 'media';
+          playSnd('snd-nav');
+        } else if (dir === 'right' && state.idx < headerIds.length - 1) {
+          state.idx++;
+          if (state.idx === 1) state.tab = 'media';
+          playSnd('snd-nav');
+        } else if (dir === 'down' && state.tab === 'games') {
+          state.zone = 'games';
+          state.idx = 0;
+          playSnd('snd-nav');
+        }
+      } else if (state.zone === 'games') {
+        if (dir === 'up') {
+          state.zone = 'header';
+          state.idx = 0;
+          playSnd('snd-nav');
+        } else if (dir === 'down') {
+          state.zone = 'actions';
+          state.idx = 0;
+          playSnd('snd-nav');
+        } else if (dir === 'right') {
+          state.zone = 'header';
+          state.idx = 2; // Quick shortcut right to Settings gear
+          playSnd('snd-nav');
+        }
+      } else if (state.zone === 'actions') {
+        if (dir === 'up') {
+          state.zone = 'games';
+          state.idx = 0;
+          playSnd('snd-nav');
+        } else if (dir === 'right' && state.idx < actionIds.length - 1) {
+          state.idx++;
+          playSnd('snd-nav');
+        } else if (dir === 'left' && state.idx > 0) {
+          state.idx--;
+          playSnd('snd-nav');
+        }
+      }
+      render();
+    },
+
+    pressCross: function() {
+      if (state.launching) return;
+      if (state.modalOpen) {
+        var opt = modalRows[state.modalIdx].getAttribute('data-opt');
+        if (opt === 'settings') {
+          state.modalOpen = false;
+          render();
+          playSnd('snd-menu-on');
+          if (window.GtaAndroidBridge) window.GtaAndroidBridge.openPs5Settings();
+        } else {
+          triggerLaunch(opt);
+        }
+        return;
+      }
+
+      if (state.zone === 'header') {
+        if (state.idx === 0) {
+          state.tab = 'games';
+          state.zone = 'actions';
+          state.idx = 0;
+          playSnd('snd-enter');
+        } else if (state.idx === 1) {
+          state.tab = 'media';
+          playSnd('snd-nav');
+        } else if (state.idx === 2) {
+          playSnd('snd-menu-on');
+          if (window.GtaAndroidBridge) window.GtaAndroidBridge.openPs5Settings();
+        }
+      } else if (state.zone === 'games') {
+        // Selecting GTA V jumps straight to Play Game button
+        state.zone = 'actions';
+        state.idx = 0;
+        playSnd('snd-nav');
+      } else if (state.zone === 'actions') {
+        if (state.idx === 0) {
+          triggerLaunch('default');
+        } else {
+          state.modalOpen = true;
+          state.modalIdx = 0;
+          playSnd('snd-menu-on');
+        }
+      }
+      render();
+    },
+
+    pressCircle: function() {
+      if (state.launching) return;
+      if (state.modalOpen) {
+        state.modalOpen = false;
+        playSnd('snd-back');
+      } else if (state.tab === 'media') {
+        state.tab = 'games';
+        state.zone = 'actions';
+        state.idx = 0;
+        playSnd('snd-back');
+      } else if (state.zone !== 'actions' || state.idx !== 0) {
+        state.zone = 'actions';
+        state.idx = 0;
+        playSnd('snd-back');
+      }
+      render();
+    },
+
+    pressOptions: function() {
+      if (state.launching) return;
+      playSnd('snd-menu-on');
+      if (window.GtaAndroidBridge) window.GtaAndroidBridge.openPs5Settings();
+    },
+
+    setProfileSummary: function(text) {
+      var el = document.getElementById('profile-summary');
+      if (el) el.textContent = text;
+    },
+
+    resetBoot: function() {
+      state.launching = false;
+      document.getElementById('boot_splash').classList.remove('visible');
+      render();
+    }
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

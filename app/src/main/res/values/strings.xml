@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PS5 Mobile</string>
+    <string name="launcher_brand">PS5</string>
+    <string name="launcher_subtitle">ANDROID SYSTEM RUNTIME · WEBGPU</string>
+    <string name="low_end_title">Low-End Phone Mode</string>
+    <string name="low_end_desc_off">Balanced performance · 60 FPS target · full WebGPU threads</string>
+    <string name="low_end_desc_on">Limits RAM &amp; GPU load · 30 FPS · 2 cores · shadows off</string>
+    <string name="launch_button">LAUNCH PS5</string>
+    <string name="launch_sub">DualSense Controller UI · Stats Overlay · Dev Trainer</string>
+</resources>

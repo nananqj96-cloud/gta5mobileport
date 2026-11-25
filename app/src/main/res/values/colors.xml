@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_obsidian">#040712</color>
+    <color name="ps5_blue">#0070D1</color>
+    <color name="ps5_cyan">#38BDF8</color>
+    <color name="ps5_light">#60A5FA</color>
+    <color name="emerald_glow">#10B981</color>
+    <color name="amber_gold">#F59E0B</color>
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#B8C7E0</color>
+    <color name="text_muted">#7B8FB2</color>
+    <color name="glass_fill">#D40A1228</color>
+    <color name="glass_stroke">#3B60A5FA</color>
+</resources>
