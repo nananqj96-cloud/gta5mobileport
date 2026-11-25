@@ -46,7 +46,14 @@ jobs:
           ANDROID_JAR: ${{ steps.sdk.outputs.android_jar }}
         run: |
           chmod +x scripts/build-apk.sh
-          ./scripts/build-apk.sh releases/PS5-Mobile.apk
+          if ! ./scripts/build-apk.sh releases/PS5-Mobile.apk > /tmp/apk-build.log 2>&1; then
+            cat /tmp/apk-build.log
+            tail -n 25 /tmp/apk-build.log | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          fi
+          cat /tmp/apk-build.log
 
       - name: Verify APK Manifest & JS Bridge
         env:
