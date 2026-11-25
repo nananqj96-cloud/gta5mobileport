@@ -26,9 +26,17 @@ jobs:
           arch: x64
 
       - name: Build Standalone ViceBox-GTA6-Emulator.exe
-        shell: cmd
+        shell: pwsh
         run: |
-          call pc-emulator\build-windows.bat
+          $output = cmd /c "pc-emulator\build-windows.bat 2>&1"
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            $errLines = ($output | Select-String -Pattern "error|fatal|LNK|CVT|RC" | Select-Object -First 8) -join " | "
+            if (-not $errLines) { $errLines = ($output | Select-Object -Last 8) -join " | " }
+            Write-Host "::error title=MSVC Build Failed::$errLines"
+            exit $code
+          }
 
       - name: Verify PE Headers & Zero Non-System DLL Dependencies
         shell: cmd
