@@ -283,12 +283,13 @@ inline bool DrawNeonButton(const char* id, const char* label, ImVec2 size,
 
     bool clicked = ImGui::InvisibleButton(id, size);
     bool hovered = ImGui::IsItemHovered();
+    bool focused = ImGui::IsItemFocused();
     bool active = ImGui::IsItemActive();
 
-    if (ImGui::IsItemHovered() && hoverState < 0.06f && !disabled) {
+    if ((hovered || focused) && hoverState < 0.06f && !disabled) {
         sfx.Play(SfxId::Hover, 0.55f);
     }
-    hoverState = ExpLerp(hoverState, hovered ? 1.0f : 0.0f, 13.0f, dt);
+    hoverState = ExpLerp(hoverState, (hovered || focused) ? 1.0f : 0.0f, 13.0f, dt);
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     float pressInset = active ? 1.5f : 0.0f;
@@ -300,7 +301,7 @@ inline bool DrawNeonButton(const char* id, const char* label, ImVec2 size,
         dl->AddRectFilled(p0, p1, ColAlpha(ImVec4(0.11f, 0.13f, 0.19f, 0.78f), alpha), rounding);
         dl->AddRect(p0, p1, ColAlpha(ImVec4(1.0f, 0.25f, 0.58f, 0.25f + 0.22f * hoverState), alpha), rounding, 0, 1.0f);
     } else {
-        // Outer glow bloom on hover
+        // Outer glow bloom on hover or controller focus
         if (hoverState > 0.02f) {
             dl->AddRectFilled(
                 ImVec2(p0.x - 4.0f, p0.y - 3.0f),
@@ -322,6 +323,11 @@ inline bool DrawNeonButton(const char* id, const char* label, ImVec2 size,
         dl->AddRect(p0, p1, ColAlpha(ImVec4(1.0f, 1.0f, 1.0f, 0.22f + 0.25f * hoverState), alpha), rounding, 0, 1.0f);
         dl->AddLine(ImVec2(p0.x + rounding, p0.y + 1.0f), ImVec2(p1.x - rounding, p0.y + 1.0f),
                     ColAlpha(ImVec4(1.0f, 1.0f, 1.0f, 0.35f), alpha), 1.0f);
+    }
+
+    if (focused) {
+        dl->AddRect(ImVec2(p0.x - 2.5f, p0.y - 2.5f), ImVec2(p1.x + 2.5f, p1.y + 2.5f),
+                    ColAlpha(Palette::Cyan, 0.95f * alpha), rounding + 2.0f, 0, 2.2f);
     }
 
     // Centered crisp label

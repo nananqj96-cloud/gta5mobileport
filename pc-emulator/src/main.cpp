@@ -430,6 +430,7 @@ static void ApplyCleanObsidianStyle() {
     c[ImGuiCol_ScrollbarBg]         = ImVec4(0.03f, 0.04f, 0.07f, 0.40f);
     c[ImGuiCol_ScrollbarGrab]       = ImVec4(0.24f, 0.30f, 0.44f, 0.65f);
     c[ImGuiCol_ScrollbarGrabHovered]= ImVec4(0.12f, 0.82f, 0.50f, 0.75f);
+    c[ImGuiCol_NavHighlight]        = Palette::Cyan;
 }
 
 static const ImVec4 kPs5Blue   = ImVec4(0.14f, 0.52f, 0.98f, 1.0f);
@@ -501,6 +502,19 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
             ImVec2(app.tabPillX + 14.0f, 42.0f), ImVec2(app.tabPillX + app.tabPillW - 14.0f, 42.0f),
             ColAlpha(pillCol, 0.95f * app.dashFade), 2.0f);
 
+        // Controller LB / RB quick-switches dashboard tabs!
+        if (!app.launching) {
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) {
+                app.activeTab = (app.activeTab - 1 + numTabs) % numTabs;
+                app.tabSlideAlpha = 0.0f;
+                sfx.Play(SfxId::TabSwitch, 0.85f);
+            } else if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) {
+                app.activeTab = (app.activeTab + 1) % numTabs;
+                app.tabSlideAlpha = 0.0f;
+                sfx.Play(SfxId::TabSwitch, 0.85f);
+            }
+        }
+
         curX = startX;
         ImGui::PushFont(fonts.bold);
         for (int i = 0; i < numTabs; ++i) {
@@ -516,7 +530,11 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
                                         i == 3 ? kDevGold : Palette::Emerald, Palette::Cyan);
                 }
             }
-            bool hov = ImGui::IsItemHovered();
+            bool hov = ImGui::IsItemHovered() || ImGui::IsItemFocused();
+            if (ImGui::IsItemFocused()) {
+                dl->AddRect(ImVec2(curX, 12.0f), ImVec2(curX + tabW[i], 42.0f),
+                            ColAlpha(Palette::Cyan, 0.90f * app.dashFade), 8.0f, 0, 1.8f);
+            }
             ImVec2 ts = ImGui::CalcTextSize(tabs[i]);
             ImVec4 tcol = (app.activeTab == i)
                               ? (i == 3 ? kDevGold : Palette::TextHi)
@@ -772,7 +790,7 @@ static void RenderLoginScreen(AppState& app, const FontSet& fonts, SoundEngine& 
                                  Palette::EmeraldDeep, Palette::Emerald, app.btnLoginHover, dt, sfx, false, alpha, &btnCenter);
     ImGui::PopFont();
 
-    if (submit || enter1 || enter2) {
+    if (submit || enter1 || enter2 || ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) {
         std::string gt(app.gamertagBuf);
         std::string pk(app.passkeyBuf);
         while (!gt.empty() && (gt.front() == ' ' || gt.front() == '\t')) gt.erase(gt.begin());
@@ -889,12 +907,13 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
             }
             bool sel = (app.config.consoleTarget == c);
             bool hov = ImGui::IsItemHovered();
-            if (sel || hov) {
+            bool foc = ImGui::IsItemFocused();
+            if (sel || hov || foc) {
                 dl->AddRectFilled(bp, ImVec2(bp.x + halfW, bp.y + swH - 6.0f),
-                                  ColAlpha(ImVec4(cCols[c].x, cCols[c].y, cCols[c].z, sel ? 0.30f : 0.12f), alpha), 7.0f);
-                if (sel) {
+                                  ColAlpha(ImVec4(cCols[c].x, cCols[c].y, cCols[c].z, sel ? 0.30f : 0.14f), alpha), 7.0f);
+                if (sel || foc) {
                     dl->AddRect(bp, ImVec2(bp.x + halfW, bp.y + swH - 6.0f),
-                                ColAlpha(cCols[c], 0.85f * alpha), 7.0f, 0, 1.3f);
+                                ColAlpha(foc ? Palette::Cyan : cCols[c], 0.90f * alpha), 7.0f, 0, foc ? 2.0f : 1.3f);
                 }
             }
             ImVec2 ts = ImGui::CalcTextSize(cLabels[c]);
@@ -997,12 +1016,13 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
             }
             bool sel = (app.config.gta5Mode == m);
             bool hov = !app.launching && ImGui::IsItemHovered();
+            bool foc = !app.launching && ImGui::IsItemFocused();
             dl->AddRectFilled(pp, ImVec2(pp.x + pillW, pp.y + 28.0f),
                               ColAlpha(sel ? ImVec4(c5Accent.x, c5Accent.y, c5Accent.z, 0.24f)
-                                           : (hov ? ImVec4(0.12f, 0.16f, 0.24f, 0.90f)
-                                                  : ImVec4(0.04f, 0.06f, 0.10f, 0.85f)), alpha), 7.0f);
+                                           : ((hov || foc) ? ImVec4(0.12f, 0.16f, 0.24f, 0.90f)
+                                                           : ImVec4(0.04f, 0.06f, 0.10f, 0.85f)), alpha), 7.0f);
             dl->AddRect(pp, ImVec2(pp.x + pillW, pp.y + 28.0f),
-                        ColAlpha(sel ? c5Accent : ImVec4(1, 1, 1, hov ? 0.22f : 0.09f), alpha), 7.0f);
+                        ColAlpha(foc ? Palette::Cyan : (sel ? c5Accent : ImVec4(1, 1, 1, hov ? 0.22f : 0.09f)), alpha), 7.0f, 0, foc ? 2.0f : 1.0f);
 
             const char* shortLbl[4] = { "TITLE", "STORY", "SANDBOX", "VICE MAP" };
             ImVec2 ls = ImGui::CalcTextSize(shortLbl[m]);
@@ -1251,10 +1271,11 @@ static void RenderConfigTab(AppState& app, const FontSet& fonts, SoundEngine& sf
                 sfx.Play(SfxId::Click, 0.65f);
             }
             bool sel = (app.config.preset == i);
+            bool foc = ImGui::IsItemFocused();
             dl->AddRectFilled(bp, ImVec2(bp.x + pw, bp.y + 30.0f),
                               ColAlpha(sel ? ImVec4(0.10f, 0.86f, 0.48f, 0.24f) : ImVec4(0.04f, 0.06f, 0.10f, 0.85f), alpha), 7.0f);
             dl->AddRect(bp, ImVec2(bp.x + pw, bp.y + 30.0f),
-                        ColAlpha(sel ? Palette::Emerald : ImVec4(1, 1, 1, 0.10f), alpha), 7.0f);
+                        ColAlpha(foc ? Palette::Cyan : (sel ? Palette::Emerald : ImVec4(1, 1, 1, 0.10f)), alpha), 7.0f, 0, foc ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::CalcTextSize(kPresetNames[i]);
             dl->AddText(ImVec2(bp.x + (pw - ts.x) * 0.5f, bp.y + (30.0f - ts.y) * 0.5f),
                         ColAlpha(sel ? Palette::TextHi : Palette::TextMid, alpha), kPresetNames[i]);
@@ -1740,6 +1761,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     FontSet fonts = LoadSystemFonts(io);
     ApplyCleanObsidianStyle();
@@ -1754,7 +1776,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ParticleSystem particles;
     particles.Init(static_cast<float>(winW), static_cast<float>(winH));
 
-    app.PushLog("[HYPERVISOR] ViceBox X v2.0 initialized (PS5 Xbox-to-PS5 Port + Xbox DashX360)");
+    app.PushLog("[HYPERVISOR] ViceBox X v2.2 initialized (Full Controller UI + Real GPU Motion Blur)");
     app.PushLog("[D3D11] Active GPU: " + app.hw.gpuName);
     app.PushLog("[HWMON] Real Windows CPU/GPU/VRAM/RAM telemetry monitor started");
     if (serverOk) {

@@ -324,11 +324,15 @@
     } catch (e) {}
   }
 
+  let lastLocalConfigEditAt = 0;
+
   async function syncServerConfig() {
+    if (performance.now() - lastLocalConfigEditAt < 1500) return;
     try {
       const r = await fetch('/vbx/api/state', { cache: 'no-store' });
       if (!r.ok) return;
       const s = await r.json();
+      if (performance.now() - lastLocalConfigEditAt < 1500) return;
       if (typeof s.consoleTarget === 'string') vbxState.consoleTarget = s.consoleTarget;
       if (typeof s.showDebugHud === 'boolean') vbxState.showDebugHud = s.showDebugHud;
       if (typeof s.enableCheatMenu === 'boolean') vbxState.enableCheatMenu = s.enableCheatMenu;
@@ -340,6 +344,7 @@
   }
 
   function pushConfigUpdate(patch) {
+    lastLocalConfigEditAt = performance.now();
     try {
       fetch('/vbx/api/config', {
         method: 'POST',
@@ -349,66 +354,221 @@
     } catch (e) {}
   }
 
-  // ==================== 5. REAL MOTION BLUR (TEMPORAL + VELOCITY STUTTER MASKING) ====================
-  let mbCanvas = null;
-  let mbCtx = null;
-  let mbLastDraw = 0;
+  // ==================== 5. REAL GPU MOTION BLUR (DIRECTIONAL SVG + RADIAL SPEED + STUTTER SMOOTHING) ====================
+  // Tracks REAL mouse look (including Pointer Lock), keyboard driving/sprinting/turning,
+  // controller sticks/triggers, and frame-time spikes. Renders 100% on the Chromium GPU compositor
+  // directly over WebGPU OffscreenCanvas #canvas (zero drawImage readback!).
+  const mbMotion = {
+    rawVx: 0,
+    rawVy: 0,
+    smoothVx: 0,
+    smoothVy: 0,
+    fwdSpeed: 0,
+    turnRate: 0,
+    lastMouseX: null,
+    lastMouseY: null,
+    keys: new Set(),
+    padGas: 0,
+    padSteer: 0
+  };
 
-  function ensureMotionBlurCanvas() {
-    if (mbCanvas || !document.body) return;
-    mbCanvas = document.createElement('canvas');
-    mbCanvas.id = 'vbx-mblur';
-    mbCanvas.style.cssText =
-      'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:4;mix-blend-mode:normal;display:none;will-change:opacity,filter;';
-    document.body.appendChild(mbCanvas);
-    mbCtx = mbCanvas.getContext('2d', { alpha: true });
+  // Capture REAL mouse movement (Pointer Lock movementX/Y + unlocked cursor fallback)
+  window.addEventListener('mousemove', (e) => {
+    let dx = (typeof e.movementX === 'number') ? e.movementX : 0;
+    let dy = (typeof e.movementY === 'number') ? e.movementY : 0;
+    if (dx === 0 && dy === 0 && mbMotion.lastMouseX !== null) {
+      dx = e.clientX - mbMotion.lastMouseX;
+      dy = e.clientY - mbMotion.lastMouseY;
+    }
+    mbMotion.lastMouseX = e.clientX;
+    mbMotion.lastMouseY = e.clientY;
+    // Clamp absurd pointer-lock jump spikes (>160px in a single event)
+    dx = Math.max(-160, Math.min(160, dx));
+    dy = Math.max(-160, Math.min(160, dy));
+    mbMotion.rawVx += dx;
+    mbMotion.rawVy += dy;
+    vbxState.lastCamSpeed = Math.min(60, Math.hypot(dx, dy));
+  }, true);
+
+  // Capture REAL keyboard movement / driving / sprinting keys
+  window.addEventListener('keydown', (e) => {
+    if (e.code) mbMotion.keys.add(e.code);
+  }, true);
+  window.addEventListener('keyup', (e) => {
+    if (e.code) mbMotion.keys.delete(e.code);
+  }, true);
+  window.addEventListener('blur', () => {
+    mbMotion.keys.clear();
+    mbMotion.padGas = 0;
+    mbMotion.padSteer = 0;
+  });
+
+  let mbSvgEl = null;
+  let mbBlurNode = null;
+  let mbRadialEl = null;
+  let mbPanEl = null;
+  let mbFilterActive = false;
+
+  function ensureMotionBlurNodes() {
+    if (!document.body) return;
+    if (!mbSvgEl) {
+      const svgNS = 'http://www.w3.org/2000/svg';
+      mbSvgEl = document.createElementNS(svgNS, 'svg');
+      mbSvgEl.id = 'vbx-mblur-svg';
+      mbSvgEl.setAttribute('aria-hidden', 'true');
+      // Keep 1x1 off-screen (never display:none or 0x0) so Chromium always keeps the SVG filter active
+      mbSvgEl.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;pointer-events:none;';
+      const defs = document.createElementNS(svgNS, 'defs');
+      const filter = document.createElementNS(svgNS, 'filter');
+      filter.id = 'vbx-dir-mblur';
+      filter.setAttribute('x', '-4%');
+      filter.setAttribute('y', '-4%');
+      filter.setAttribute('width', '108%');
+      filter.setAttribute('height', '108%');
+      filter.setAttribute('color-interpolation-filters', 'sRGB');
+      mbBlurNode = document.createElementNS(svgNS, 'feGaussianBlur');
+      mbBlurNode.id = 'vbx-dir-blur';
+      mbBlurNode.setAttribute('in', 'SourceGraphic');
+      mbBlurNode.setAttribute('stdDeviation', '0 0');
+      mbBlurNode.setAttribute('edgeMode', 'duplicate');
+      filter.appendChild(mbBlurNode);
+      defs.appendChild(filter);
+      mbSvgEl.appendChild(defs);
+      document.body.appendChild(mbSvgEl);
+    }
+    if (!mbPanEl) {
+      mbPanEl = document.createElement('div');
+      mbPanEl.id = 'vbx-mblur-pan';
+      mbPanEl.style.cssText =
+        'position:fixed;inset:0;pointer-events:none;z-index:99898;display:none;will-change:backdrop-filter,opacity;';
+      document.body.appendChild(mbPanEl);
+    }
+    if (!mbRadialEl) {
+      mbRadialEl = document.createElement('div');
+      mbRadialEl.id = 'vbx-mblur-radial';
+      mbRadialEl.style.cssText =
+        'position:fixed;inset:0;pointer-events:none;z-index:99899;display:none;' +
+        '-webkit-mask-image:radial-gradient(ellipse 62% 60% at 50% 50%, transparent 38%, rgba(0,0,0,0.95) 100%);' +
+        'mask-image:radial-gradient(ellipse 62% 60% at 50% 50%, transparent 38%, rgba(0,0,0,0.95) 100%);' +
+        'will-change:backdrop-filter,opacity;';
+      document.body.appendChild(mbRadialEl);
+    }
   }
 
   function updateMotionBlur(now, dtMs) {
     const gameCanvas = getGameCanvas();
     if (!gameCanvas) return;
-    ensureMotionBlurCanvas();
+    ensureMotionBlurNodes();
+
+    const clampedDt = Math.max(4, Math.min(80, dtMs || 16.67));
+    const dtSec = clampedDt / 1000;
+
+    // Integrate camera velocity from mouse + controller right-stick with smooth exponential decay
+    const decay = Math.exp(-dtSec * 12.0);
+    mbMotion.smoothVx = mbMotion.smoothVx * decay + mbMotion.rawVx * (1 - decay) * 2.4;
+    mbMotion.smoothVy = mbMotion.smoothVy * decay + mbMotion.rawVy * (1 - decay) * 2.4;
+    mbMotion.rawVx = 0;
+    mbMotion.rawVy = 0;
+    vbxState.lastCamSpeed *= decay;
+
+    // Integrate driving/sprinting forward speed & steering yaw from keyboard + controller
+    const k = mbMotion.keys;
+    const movingFwd = k.has('KeyW') || k.has('ArrowUp') || mbMotion.padGas > 0.15;
+    const movingRev = k.has('KeyS') || k.has('ArrowDown');
+    const sprinting = k.has('ShiftLeft') || k.has('ShiftRight');
+    const steering = (k.has('KeyA') || k.has('ArrowLeft') ? -1 : 0) + (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) + mbMotion.padSteer;
+
+    const targetFwd = movingFwd ? (sprinting || vbxState.vehicleMode ? 1.0 : 0.72) : (movingRev ? 0.45 : 0.0);
+    const rampRate = targetFwd > mbMotion.fwdSpeed ? 3.4 : 4.8;
+    mbMotion.fwdSpeed += (targetFwd - mbMotion.fwdSpeed) * Math.min(1, dtSec * rampRate);
+
+    const targetTurn = Math.min(1.0, Math.abs(steering)) * (0.45 + mbMotion.fwdSpeed * 0.55);
+    mbMotion.turnRate += (targetTurn - mbMotion.turnRate) * Math.min(1, dtSec * 8.0);
 
     if (!vbxState.motionBlur || vbxState.motionBlurStrength <= 0) {
-      if (mbCanvas) mbCanvas.style.display = 'none';
-      gameCanvas.style.filter = '';
+      if (mbFilterActive) {
+        gameCanvas.style.filter = '';
+        mbFilterActive = false;
+      }
+      if (mbPanEl) mbPanEl.style.display = 'none';
+      if (mbRadialEl) mbRadialEl.style.display = 'none';
       return;
     }
 
-    const strength = vbxState.motionBlurStrength / 100.0; // 0..1
-    // Velocity + stutter-adaptive micro-blur on the game canvas itself (GPU composited, zero readback stall!)
-    const stutterFactor = Math.max(0, Math.min(1, (dtMs - 20) / 35));
-    const camFactor = Math.min(1, vbxState.lastCamSpeed / 24);
-    vbxState.lastCamSpeed *= 0.82;
-    const blurPx = (0.35 + stutterFactor * 1.65 + camFactor * 1.45) * strength;
-    gameCanvas.style.filter = blurPx > 0.15 ? `blur(${blurPx.toFixed(2)}px)` : '';
+    const strength = Math.max(0, Math.min(1, vbxState.motionBlurStrength / 100.0));
+    const stutterBoost = Math.max(0, Math.min(1, (clampedDt - 19) / 28)) * 3.0;
 
-    // Temporal ghosting layer over game canvas to mask frame drops smoothly
-    if (mbCanvas && mbCtx && now - mbLastDraw >= 16) {
-      mbLastDraw = now;
-      const targetW = Math.min(960, Math.max(320, Math.floor(window.innerWidth * 0.5)));
-      const targetH = Math.min(540, Math.max(180, Math.floor(window.innerHeight * 0.5)));
-      if (mbCanvas.width !== targetW || mbCanvas.height !== targetH) {
-        mbCanvas.width = targetW;
-        mbCanvas.height = targetH;
+    // Layer 1: TRUE anisotropic directional SVG blur on #canvas (horizontal vs vertical streak)
+    const absVx = Math.abs(mbMotion.smoothVx);
+    const absVy = Math.abs(mbMotion.smoothVy);
+    const camVel = Math.hypot(absVx, absVy);
+    const dirX = Math.min(14.0, (absVx * 0.30 + mbMotion.turnRate * 3.8 + mbMotion.fwdSpeed * 0.9 + stutterBoost) * strength);
+    const dirY = Math.min(10.0, (absVy * 0.26 + mbMotion.fwdSpeed * 0.35 + stutterBoost * 0.55) * strength);
+
+    if (mbBlurNode && (dirX > 0.14 || dirY > 0.14)) {
+      mbBlurNode.setAttribute('stdDeviation', `${dirX.toFixed(2)} ${dirY.toFixed(2)}`);
+      if (!mbFilterActive) {
+        gameCanvas.style.filter = 'url(#vbx-dir-mblur)';
+        mbFilterActive = true;
       }
-      try {
-        // Decay previous frame slightly & blend current frame for smooth temporal motion blur
-        mbCtx.globalCompositeOperation = 'source-over';
-        mbCtx.globalAlpha = Math.max(0.28, 0.72 - strength * 0.36);
-        mbCtx.drawImage(gameCanvas, 0, 0, targetW, targetH);
-        mbCanvas.style.display = 'block';
-        mbCanvas.style.opacity = String(Math.min(0.42, (0.14 + stutterFactor * 0.18 + camFactor * 0.14) * strength));
-      } catch (e) {
-        // If WebGPU swapchain disallows drawImage, keep smooth GPU velocity blur active
-        mbCanvas.style.display = 'none';
-      }
+    } else if (mbFilterActive) {
+      gameCanvas.style.filter = '';
+      mbFilterActive = false;
+    }
+
+    // Layer 2: Compositor-level camera-pan & stutter smoothing blur (guaranteed on ALL WebGPU OffscreenCanvas drivers!)
+    const panPx = Math.min(7.5, (camVel * 0.16 + mbMotion.turnRate * 2.1 + stutterBoost * 0.85) * strength);
+    if (mbPanEl && panPx > 0.25) {
+      mbPanEl.style.display = 'block';
+      mbPanEl.style.backdropFilter = `blur(${panPx.toFixed(1)}px)`;
+      mbPanEl.style.webkitBackdropFilter = `blur(${panPx.toFixed(1)}px)`;
+      mbPanEl.style.opacity = String(Math.min(0.78, 0.22 + (panPx / 7.5) * 0.56));
+    } else if (mbPanEl) {
+      mbPanEl.style.display = 'none';
+    }
+
+    // Layer 3: GPU-composited Peripheral Radial Speed Tunnel (sharp center, smooth rushing edges during driving/sprinting/turning)
+    const speedMag = Math.min(1.0, mbMotion.fwdSpeed * 0.88 + camVel * 0.03 + mbMotion.turnRate * 0.5);
+    const radialPx = (speedMag * 8.5 + stutterBoost * 0.9) * strength;
+    if (mbRadialEl && radialPx > 0.35) {
+      mbRadialEl.style.display = 'block';
+      mbRadialEl.style.backdropFilter = `blur(${radialPx.toFixed(1)}px)`;
+      mbRadialEl.style.webkitBackdropFilter = `blur(${radialPx.toFixed(1)}px)`;
+      mbRadialEl.style.opacity = String(Math.min(0.95, 0.35 + speedMag * 0.6));
+    } else if (mbRadialEl) {
+      mbRadialEl.style.display = 'none';
     }
   }
 
-  // ==================== 6. DUALSENSE & XBOX CONTROLLER -> REAL GTA V DEFAULT CONTROLS ====================
+  // ==================== 6. DUALSENSE & XBOX CONTROLLER -> REAL GTA V DEFAULT CONTROLS + CHEAT DRAWER NAV ====================
   const prevBtn = new Array(24).fill(false);
   let lastComboAt = 0;
+  let drawerFocusIdx = 0;
+  let drawerPadVCd = 0;
+  let drawerPadHCd = 0;
+
+  function getCheatDrawerControls() {
+    const body = document.getElementById('vbx-cheat-body');
+    if (!body) return [];
+    return Array.from(body.querySelectorAll('button:not(:disabled), input[type="checkbox"], input[type="range"], input[type="text"]')).filter((el) => {
+      const st = window.getComputedStyle(el);
+      return st.display !== 'none' && st.visibility !== 'hidden';
+    });
+  }
+
+  function applyCheatDrawerFocus() {
+    const body = document.getElementById('vbx-cheat-body');
+    if (!body) return;
+    body.querySelectorAll('.vbx-pad-focus').forEach(el => el.classList.remove('vbx-pad-focus'));
+    if (!vbxState.cheatOpen) return;
+    const ctrls = getCheatDrawerControls();
+    if (!ctrls.length) return;
+    drawerFocusIdx = Math.max(0, Math.min(ctrls.length - 1, drawerFocusIdx));
+    const el = ctrls[drawerFocusIdx];
+    const target = (el.type === 'checkbox' && el.closest('.vbx-toggle')) ? el.closest('.vbx-toggle') : el;
+    target.classList.add('vbx-pad-focus');
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 
   function pollGamepad(now) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -417,6 +577,8 @@
       if (pads[i] && pads[i].connected) { gp = pads[i]; break; }
     }
     if (!gp) {
+      mbMotion.padGas = 0;
+      mbMotion.padSteer = 0;
       if (vbxState.controllerName) {
         vbxState.controllerName = '';
         updateHudControllerBadge();
@@ -442,14 +604,83 @@
     if (b(10) && b(11) && now - lastComboAt > 450) {
       lastComboAt = now;
       toggleCheatDrawer();
+      if (vbxState.cheatOpen) {
+        drawerFocusIdx = 0;
+        applyCheatDrawerFocus();
+      }
     }
     // PS / Xbox Guide Button (16) -> return to console dashboard
     if (pressed(16)) {
       returnToConsoleDashboard();
     }
 
-    // Don't drive character while Cheat Menu is open
-    if (!vbxState.cheatOpen) {
+    if (vbxState.cheatOpen) {
+      // Full Controller Navigation inside Cheat & Visuals/Perf Drawer!
+      mbMotion.padGas = 0;
+      mbMotion.padSteer = 0;
+      const lx = gp.axes[0] || 0;
+      const ly = gp.axes[1] || 0;
+      const dUp = b(12) || ly < -0.55;
+      const dDown = b(13) || ly > 0.55;
+      const dLeft = b(14) || lx < -0.55;
+      const dRight = b(15) || lx > 0.55;
+
+      if (pressed(1)) {
+        toggleCheatDrawer(false);
+      } else if (pressed(4)) {
+        activeCheatTab = (activeCheatTab - 1 + 5) % 5;
+        drawerFocusIdx = 0;
+        renderCheatTab();
+        applyCheatDrawerFocus();
+      } else if (pressed(5)) {
+        activeCheatTab = (activeCheatTab + 1) % 5;
+        drawerFocusIdx = 0;
+        renderCheatTab();
+        applyCheatDrawerFocus();
+      } else {
+        const ctrls = getCheatDrawerControls();
+        const cur = ctrls[drawerFocusIdx];
+        if (dDown && now - drawerPadVCd > 155 && ctrls.length) {
+          drawerPadVCd = now;
+          drawerFocusIdx = (drawerFocusIdx + 1) % ctrls.length;
+          applyCheatDrawerFocus();
+        } else if (dUp && now - drawerPadVCd > 155 && ctrls.length) {
+          drawerPadVCd = now;
+          drawerFocusIdx = (drawerFocusIdx - 1 + ctrls.length) % ctrls.length;
+          applyCheatDrawerFocus();
+        } else if ((dLeft || dRight) && now - drawerPadHCd > 120 && cur) {
+          drawerPadHCd = now;
+          const dir = dRight ? 1 : -1;
+          if (cur.tagName === 'INPUT' && cur.type === 'range') {
+            const min = parseFloat(cur.min || '0');
+            const max = parseFloat(cur.max || '100');
+            const next = Math.max(min, Math.min(max, (parseFloat(cur.value || '0') + dir * 5)));
+            cur.value = String(next);
+            cur.dispatchEvent(new Event('input', { bubbles: true }));
+            cur.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (cur.tagName === 'INPUT' && cur.type === 'checkbox') {
+            cur.checked = dir > 0;
+            cur.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (ctrls.length > 1) {
+            drawerFocusIdx = (drawerFocusIdx + dir + ctrls.length) % ctrls.length;
+            applyCheatDrawerFocus();
+          }
+        } else if (pressed(0) && cur) {
+          if (cur.tagName === 'INPUT' && cur.type === 'checkbox') {
+            cur.checked = !cur.checked;
+            cur.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (cur.tagName === 'INPUT' && cur.type === 'range') {
+            const next = (parseInt(cur.value, 10) + 10) % 105;
+            cur.value = String(Math.min(100, next));
+            cur.dispatchEvent(new Event('input', { bubbles: true }));
+          } else if (cur.tagName === 'INPUT' && cur.type === 'text') {
+            cur.focus();
+          } else {
+            cur.click();
+          }
+        }
+      }
+    } else {
       // Check if GTA V title screen is still visible -> map A/Cross = Story, X/Square = Sandbox
       const loadingEl = document.getElementById('loading');
       const onTitle = loadingEl && !loadingEl.classList.contains('done');
@@ -468,6 +699,8 @@
         const deadL = 0.22;
         const deadR = 0.14;
 
+        mbMotion.padSteer = Math.abs(lx) > deadL ? lx : 0;
+
         // Triangle / Y (btn 3): Enter / Exit Vehicle (F) & toggles On-Foot <-> Vehicle trigger profile!
         if (pressed(3)) {
           pulseKey('KeyF', 80);
@@ -480,6 +713,7 @@
           // VEHICLE CONTROLS (Authentic GTA V Default)
           const gas = v(7) > 0.15 || ly < -deadL;   // R2 / RT accelerate
           const brk = v(6) > 0.15 || ly > deadL;    // L2 / LT brake/reverse
+          mbMotion.padGas = Math.max(v(7), ly < -deadL ? -ly : 0);
           dispatchKey('KeyW', gas);
           dispatchKey('KeyS', brk);
           dispatchKey('KeyA', lx < -deadL);         // Left Stick steer left
@@ -496,6 +730,7 @@
           dispatchMouseBtn(2, false);
         } else {
           // ON-FOOT CONTROLS (Authentic GTA V Default)
+          mbMotion.padGas = ly < -deadL ? -ly : 0;
           dispatchKey('KeyW', ly < -deadL);         // Left Stick forward
           dispatchKey('KeyS', ly > deadL);          // Left Stick backward
           dispatchKey('KeyA', lx < -deadL);         // Left Stick left
@@ -512,12 +747,16 @@
           dispatchKey('KeyE', false);
         }
 
-        // Right Stick -> Smooth 360° Camera Look (non-linear acceleration curve)
+        // Right Stick -> Smooth 360° Camera Look (non-linear acceleration curve + motion blur feed!)
         const rMag = Math.hypot(rx, ry);
         if (rMag > deadR) {
           const norm = (rMag - deadR) / (1.0 - deadR);
           const curved = norm * norm * 16.5;
-          dispatchMouseMove((rx / rMag) * curved, (ry / rMag) * curved);
+          const rdx = (rx / rMag) * curved;
+          const rdy = (ry / rMag) * curved;
+          mbMotion.rawVx += rdx * 2.2;
+          mbMotion.rawVy += rdy * 2.2;
+          dispatchMouseMove(rdx, rdy);
         }
 
         // D-Pad & Menu buttons (shared)
@@ -764,7 +1003,11 @@
     const style = document.createElement('style');
     style.id = 'vbx-pc-overlay-style';
     style.textContent = `
-      #canvas { contain: layout style paint; will-change: transform; }
+      #canvas { will-change: filter, transform; }
+      .vbx-pad-focus {
+        outline: 2.5px solid #ffffff !important;
+        box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.72), 0 0 18px rgba(56, 189, 248, 0.5) !important;
+      }
       #vbx-hud {
         position: fixed; top: 12px; right: 12px; z-index: 99990;
         width: 256px; padding: 11px 13px; border-radius: 12px;
@@ -1018,6 +1261,7 @@
     syncServerConfig();
     pollTelemetry();
     setInterval(pollTelemetry, 500);
+    setInterval(syncServerConfig, 2500);
     requestAnimationFrame(mainLoop);
   }
 

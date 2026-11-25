@@ -693,6 +693,34 @@
     background: rgba(248, 212, 84, 0.12);
     color: #fff4c2;
   }
+  .ps5-set-list.pane-active .ps5-set-item.active {
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .ps5-opt-row.pad-row-focused {
+    background: rgba(56, 189, 248, 0.12) !important;
+    border-radius: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
+    box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55), 0 0 22px rgba(56, 189, 248, 0.22);
+    transition: background 0.14s, box-shadow 0.14s;
+  }
+  .pad-focused {
+    outline: 2.5px solid #ffffff !important;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.55), 0 0 22px rgba(56, 189, 248, 0.45) !important;
+  }
+  .ps5-switch.pad-focused {
+    border-radius: 999px;
+  }
+  .ps5-set-pad-hint {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.78);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
   .ps5-set-ico {
     width: 26px;
     height: 26px;
@@ -980,6 +1008,12 @@
       </svg>
       Settings
     </div>
+    <div class="ps5-set-pad-hint" id="ps5SetPadHint">
+      <span><span class="ps5_key_badge">✕</span>Enter Tab / Toggle</span>
+      <span><span class="ps5_key_badge ps5_key_pill">◀ ▶</span>Adjust Slider / Option</span>
+      <span><span class="ps5_key_badge ps5_key_pill">L1 / R1</span>Switch Tab</span>
+      <span><span class="ps5_key_badge">○</span>Back</span>
+    </div>
     <button class="ps5-set-back" id="btnCloseSettings">○ Back to Home</button>
   </div>
   <div class="ps5-set-layout">
@@ -1156,7 +1190,12 @@
     gta5Url: '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1',
     settingsOpen: false,
     activeSettingCat: 0,
+    settingsFocusArea: 'sidebar', // 'sidebar' | 'pane'
+    settingsItemIdx: 0,
     modalOpen: false,
+    modalBtnIdx: 0,
+    homeFocusZone: 'track', // 'track' | 'actions'
+    homeActionIdx: 0,
     telemetry: { cpuPct: 0, gpuPct: 0, vramUsedMb: 0, ramUsedGb: 0, ramTotalGb: 16, gpuName: 'Direct3D 11 GPU' }
   };
 
@@ -1334,6 +1373,7 @@
 
   function openModal(title, html, actions) {
     appState.modalOpen = true;
+    appState.modalBtnIdx = Math.max(0, (actions ? actions.length : 1) - 1);
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = html;
     const act = document.getElementById('modalActions');
@@ -1346,6 +1386,7 @@
       act.appendChild(b);
     });
     document.getElementById('ps5Modal').classList.add('open');
+    applyModalFocus();
   }
 
   function closeModal() {
@@ -1598,20 +1639,25 @@
 
   function openSettings(catIdx) {
     appState.settingsOpen = true;
+    appState.settingsFocusArea = 'sidebar';
+    appState.settingsItemIdx = 0;
     if (typeof catIdx === 'number') appState.activeSettingCat = catIdx;
     document.getElementById('ps5-settings-overlay').classList.add('open');
     renderSettingsSidebar();
     renderSettingsDetail();
+    applySettingsFocus();
   }
 
   function closeSettings() {
     appState.settingsOpen = false;
+    appState.settingsFocusArea = 'sidebar';
     document.getElementById('ps5-settings-overlay').classList.remove('open');
   }
 
   function renderSettingsSidebar() {
     const list = document.getElementById('settingsCatList');
     list.innerHTML = '';
+    list.classList.toggle('pane-active', appState.settingsFocusArea === 'pane');
     SETTINGS_CATS.forEach((c, i) => {
       const btn = document.createElement('button');
       btn.className = 'ps5-set-item' + (i === appState.activeSettingCat ? ' active' : '') + (c.jailbreak ? ' jailbreak' : '');
@@ -1619,13 +1665,195 @@
       btn.onclick = () => {
         playPs5Sfx('nav');
         appState.activeSettingCat = i;
+        appState.settingsFocusArea = 'sidebar';
+        appState.settingsItemIdx = 0;
         renderSettingsSidebar();
         renderSettingsDetail();
+        applySettingsFocus();
       };
       list.appendChild(btn);
     });
     const act = list.children[appState.activeSettingCat];
     if (act) act.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ==================== PS5 SETTINGS & MODAL CONTROLLER FOCUS ENGINE ====================
+  function getSettingsPaneControls() {
+    const pane = document.getElementById('settingsDetailPane');
+    if (!pane) return [];
+    const raw = pane.querySelectorAll('button:not(:disabled), input[type="checkbox"], input[type="range"], select, input[type="text"], input[type="number"], label.ps5-ctrl-btn, .avatar-opt');
+    return Array.from(raw).filter((el) => {
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      return true;
+    });
+  }
+
+  function applySettingsFocus() {
+    const list = document.getElementById('settingsCatList');
+    const pane = document.getElementById('settingsDetailPane');
+    if (list) list.classList.toggle('pane-active', appState.settingsFocusArea === 'pane');
+    if (pane) {
+      pane.querySelectorAll('.pad-focused').forEach(el => el.classList.remove('pad-focused'));
+      pane.querySelectorAll('.pad-row-focused').forEach(el => el.classList.remove('pad-row-focused'));
+    }
+    const hint = document.getElementById('ps5SetPadHint');
+    if (appState.settingsFocusArea !== 'pane') {
+      if (hint) {
+        hint.innerHTML =
+          '<span><span class="ps5_key_badge">✕</span>Enter Tab</span>' +
+          '<span><span class="ps5_key_badge ps5_key_pill">▲ ▼</span>Categories</span>' +
+          '<span><span class="ps5_key_badge ps5_key_pill">▶</span>Customize</span>' +
+          '<span><span class="ps5_key_badge">○</span>Close</span>';
+      }
+      return;
+    }
+    const ctrls = getSettingsPaneControls();
+    if (!ctrls.length) {
+      appState.settingsFocusArea = 'sidebar';
+      if (list) list.classList.remove('pane-active');
+      return;
+    }
+    appState.settingsItemIdx = Math.max(0, Math.min(ctrls.length - 1, appState.settingsItemIdx));
+    const el = ctrls[appState.settingsItemIdx];
+    const visualTarget = (el.type === 'checkbox' && el.closest('.ps5-switch')) ? el.closest('.ps5-switch') : el;
+    visualTarget.classList.add('pad-focused');
+    const row = el.closest('.ps5-opt-row');
+    if (row) {
+      row.classList.add('pad-row-focused');
+      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } else {
+      visualTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    if (hint) {
+      let actionTxt = 'Select / Toggle';
+      if (el.tagName === 'INPUT' && el.type === 'range') actionTxt = '◀ ▶ Adjust Slider';
+      else if (el.tagName === 'SELECT') actionTxt = '✕ or ◀ ▶ Change Option';
+      else if (el.tagName === 'INPUT' && el.type === 'checkbox') actionTxt = '✕ Toggle ON/OFF';
+      else if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) actionTxt = '✕ Focus Input';
+      hint.innerHTML =
+        `<span><span class="ps5_key_badge">✕</span>${actionTxt}</span>` +
+        '<span><span class="ps5_key_badge ps5_key_pill">▲ ▼</span>Next Control</span>' +
+        '<span><span class="ps5_key_badge ps5_key_pill">L1 / R1</span>Switch Tab</span>' +
+        '<span><span class="ps5_key_badge">○</span>Back to Tabs</span>';
+    }
+  }
+
+  function enterSettingsPane() {
+    const ctrls = getSettingsPaneControls();
+    if (!ctrls.length) {
+      playPs5Sfx('error');
+      return;
+    }
+    playPs5Sfx('confirm');
+    appState.settingsFocusArea = 'pane';
+    appState.settingsItemIdx = 0;
+    applySettingsFocus();
+  }
+
+  function activatePs5Control(el) {
+    if (!el) return;
+    if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+      el.checked = !el.checked;
+      playPs5Sfx('confirm');
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      applySettingsFocus();
+    } else if (el.tagName === 'SELECT') {
+      if (el.options.length > 0) {
+        el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+        playPs5Sfx('confirm');
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        showToast(el.options[el.selectedIndex].text, '#38bdf8');
+      }
+      applySettingsFocus();
+    } else if (el.tagName === 'INPUT' && el.type === 'range') {
+      adjustPs5Control(el, 1, true);
+    } else if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) {
+      playPs5Sfx('confirm');
+      el.focus();
+      el.select();
+      showToast('Use keyboard to type, then press Enter or click Apply', '#38bdf8');
+    } else {
+      playPs5Sfx('confirm');
+      el.click();
+      setTimeout(() => { if (appState.settingsOpen) applySettingsFocus(); }, 30);
+    }
+  }
+
+  function adjustPs5Control(el, dir, wrapRange) {
+    if (!el) return false;
+    if (el.tagName === 'INPUT' && el.type === 'range') {
+      const min = parseFloat(el.min || '0');
+      const max = parseFloat(el.max || '100');
+      const rawStep = parseFloat(el.step || '1');
+      const span = max - min;
+      const delta = span <= 2 ? Math.max(rawStep, 0.05) : Math.max(rawStep, 5);
+      let next = parseFloat(el.value || '0') + dir * delta;
+      if (wrapRange && next > max) next = min;
+      next = Math.max(min, Math.min(max, Math.round(next * 100) / 100));
+      el.value = String(next);
+      playPs5Sfx('nav');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+    if (el.tagName === 'SELECT' && el.options.length > 0) {
+      el.selectedIndex = (el.selectedIndex + dir + el.options.length) % el.options.length;
+      playPs5Sfx('nav');
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      showToast(el.options[el.selectedIndex].text, '#38bdf8');
+      return true;
+    }
+    if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+      const want = dir > 0;
+      if (el.checked !== want) {
+        el.checked = want;
+        playPs5Sfx('confirm');
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return true;
+    }
+    if (el.classList.contains('avatar-opt')) {
+      const ctrls = getSettingsPaneControls();
+      const targetIdx = appState.settingsItemIdx + dir;
+      if (targetIdx >= 0 && targetIdx < ctrls.length && ctrls[targetIdx].classList.contains('avatar-opt')) {
+        appState.settingsItemIdx = targetIdx;
+        playPs5Sfx('nav');
+        applySettingsFocus();
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  function getModalButtons() {
+    const act = document.getElementById('modalActions');
+    return act ? Array.from(act.querySelectorAll('button')) : [];
+  }
+
+  function applyModalFocus() {
+    const btns = getModalButtons();
+    btns.forEach(b => b.classList.remove('pad-focused'));
+    if (!btns.length) return;
+    appState.modalBtnIdx = Math.max(0, Math.min(btns.length - 1, appState.modalBtnIdx));
+    btns[appState.modalBtnIdx].classList.add('pad-focused');
+  }
+
+  function getHomeActionButtons() {
+    const list = [document.getElementById('btnPlayGame'), document.getElementById('btnMoreInfo')];
+    const tr = document.getElementById('trophiesCard');
+    if (tr && tr.style.display !== 'none') list.push(tr);
+    return list.filter(Boolean);
+  }
+
+  function applyHomeActionFocus() {
+    document.querySelectorAll('#btnPlayGame, #btnMoreInfo, #trophiesCard').forEach(el => el.classList.remove('pad-focused'));
+    if (appState.homeFocusZone !== 'actions') return;
+    const btns = getHomeActionButtons();
+    if (!btns.length) { appState.homeFocusZone = 'track'; return; }
+    appState.homeActionIdx = Math.max(0, Math.min(btns.length - 1, appState.homeActionIdx));
+    btns[appState.homeActionIdx].classList.add('pad-focused');
   }
 
   function pushConfig(patch) {
@@ -2050,7 +2278,10 @@
 
   // ==================== FULL KEYBOARD + DUALSENSE / XBOX CONTROLLER NAVIGATION ====================
   window.addEventListener('keydown', (e) => {
-    if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+      if (e.key === 'Escape') { document.activeElement.blur(); }
+      return;
+    }
 
     if (appState.bootStage < 4) {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -2060,29 +2291,127 @@
       return;
     }
     if (appState.modalOpen) {
-      if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Enter') { e.preventDefault(); closeModal(); }
+      const mBtns = getModalButtons();
+      if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); closeModal(); }
+      else if (e.key === 'ArrowRight' && mBtns.length) { e.preventDefault(); playPs5Sfx('nav'); appState.modalBtnIdx = (appState.modalBtnIdx + 1) % mBtns.length; applyModalFocus(); }
+      else if (e.key === 'ArrowLeft' && mBtns.length) { e.preventDefault(); playPs5Sfx('nav'); appState.modalBtnIdx = (appState.modalBtnIdx - 1 + mBtns.length) % mBtns.length; applyModalFocus(); }
+      else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (mBtns[appState.modalBtnIdx]) mBtns[appState.modalBtnIdx].click();
+        else closeModal();
+      }
       return;
     }
     if (appState.settingsOpen) {
-      if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); playPs5Sfx('back'); closeSettings(); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); playPs5Sfx('nav'); appState.activeSettingCat = (appState.activeSettingCat + 1) % SETTINGS_CATS.length; renderSettingsSidebar(); renderSettingsDetail(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); playPs5Sfx('nav'); appState.activeSettingCat = (appState.activeSettingCat - 1 + SETTINGS_CATS.length) % SETTINGS_CATS.length; renderSettingsSidebar(); renderSettingsDetail(); }
+      if (appState.settingsFocusArea === 'pane') {
+        const ctrls = getSettingsPaneControls();
+        const cur = ctrls[appState.settingsItemIdx];
+        if (e.key === 'Escape' || e.key === 'Backspace') {
+          e.preventDefault(); playPs5Sfx('back');
+          appState.settingsFocusArea = 'sidebar'; applySettingsFocus();
+        } else if (e.key === 'ArrowDown' && ctrls.length) {
+          e.preventDefault(); playPs5Sfx('nav');
+          appState.settingsItemIdx = (appState.settingsItemIdx + 1) % ctrls.length; applySettingsFocus();
+        } else if (e.key === 'ArrowUp' && ctrls.length) {
+          e.preventDefault(); playPs5Sfx('nav');
+          appState.settingsItemIdx = (appState.settingsItemIdx - 1 + ctrls.length) % ctrls.length; applySettingsFocus();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault(); adjustPs5Control(cur, 1, false);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          if (!adjustPs5Control(cur, -1, false)) {
+            playPs5Sfx('back'); appState.settingsFocusArea = 'sidebar'; applySettingsFocus();
+          }
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); activatePs5Control(cur);
+        }
+      } else {
+        if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); playPs5Sfx('back'); closeSettings(); }
+        else if (e.key === 'ArrowDown') {
+          e.preventDefault(); playPs5Sfx('nav');
+          appState.activeSettingCat = (appState.activeSettingCat + 1) % SETTINGS_CATS.length;
+          appState.settingsItemIdx = 0; renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault(); playPs5Sfx('nav');
+          appState.activeSettingCat = (appState.activeSettingCat - 1 + SETTINGS_CATS.length) % SETTINGS_CATS.length;
+          appState.settingsItemIdx = 0; renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+        } else if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); enterSettingsPane();
+        }
+      }
       return;
     }
 
-    if (e.key === 'ArrowRight') { e.preventDefault(); selectItem(appState.selectedIdx + 1, true); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); selectItem(appState.selectedIdx - 1, true); }
-    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); launchSelectedItem(); }
-    else if (e.key === 's' || e.key === 'S' || e.key === 'Escape') { e.preventDefault(); playPs5Sfx('confirm'); openSettings(0); }
-    else if (e.key === 'Tab') {
+    if (e.key === 'ArrowDown' && appState.homeFocusZone === 'track') {
+      e.preventDefault(); playPs5Sfx('nav');
+      appState.homeFocusZone = 'actions'; appState.homeActionIdx = 0; applyHomeActionFocus();
+    } else if (e.key === 'ArrowUp' && appState.homeFocusZone === 'actions') {
+      e.preventDefault(); playPs5Sfx('nav');
+      appState.homeFocusZone = 'track'; applyHomeActionFocus();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (appState.homeFocusZone === 'actions') {
+        const btns = getHomeActionButtons();
+        if (btns.length) { playPs5Sfx('nav'); appState.homeActionIdx = (appState.homeActionIdx + 1) % btns.length; applyHomeActionFocus(); }
+      } else selectItem(appState.selectedIdx + 1, true);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      if (appState.homeFocusZone === 'actions') {
+        const btns = getHomeActionButtons();
+        if (btns.length) { playPs5Sfx('nav'); appState.homeActionIdx = (appState.homeActionIdx - 1 + btns.length) % btns.length; applyHomeActionFocus(); }
+      } else selectItem(appState.selectedIdx - 1, true);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (appState.homeFocusZone === 'actions') {
+        const btns = getHomeActionButtons();
+        if (btns[appState.homeActionIdx]) btns[appState.homeActionIdx].click();
+      } else launchSelectedItem();
+    } else if (e.key === 's' || e.key === 'S' || e.key === 'Escape') {
+      e.preventDefault(); playPs5Sfx('confirm'); openSettings(0);
+    } else if (e.key === 'Tab') {
       e.preventDefault();
       if (appState.activeSection === 'games') document.getElementById('tabMedia').click();
       else document.getElementById('tabGames').click();
     }
   });
 
-  // Live Gamepad API polling (DualSense / Xbox controller controls the ENTIRE PS5 UI!)
+  // Universal Gamepad Snapshot (DualSense, DualShock, Xbox Series/360, DirectInput POV Hats)
+  function readPadDirections(gp) {
+    const btn = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
+    const lx = gp.axes[0] || 0;
+    const ly = gp.axes[1] || 0;
+    let dUp = btn(12) || ly < -0.55;
+    let dDown = btn(13) || ly > 0.55;
+    let dLeft = btn(14) || lx < -0.55;
+    let dRight = btn(15) || lx > 0.55;
+    // DirectInput D-pad fallback (axes 6/7 or POV hat axis 9)
+    if (gp.axes.length >= 8 && Math.abs(gp.axes[6]) + Math.abs(gp.axes[7]) > 0.5) {
+      if (gp.axes[6] < -0.5) dLeft = true;
+      if (gp.axes[6] > 0.5) dRight = true;
+      if (gp.axes[7] < -0.5) dUp = true;
+      if (gp.axes[7] > 0.5) dDown = true;
+    } else if (gp.axes.length >= 10 && gp.axes[9] >= -1.05 && gp.axes[9] <= 1.05) {
+      const pov = gp.axes[9];
+      if (Math.abs(pov - (-1.0)) < 0.15) dUp = true;
+      else if (Math.abs(pov - (-0.428)) < 0.15) dRight = true;
+      else if (Math.abs(pov - (0.142)) < 0.15) dDown = true;
+      else if (Math.abs(pov - (0.714)) < 0.15) dLeft = true;
+    }
+    return { btn, dUp, dDown, dLeft, dRight };
+  }
+
+  window.addEventListener('gamepadconnected', (e) => {
+    const ind = document.getElementById('ps5PadIndicator');
+    if (ind && e.gamepad) {
+      const isDs = /dualsense|054c|wireless controller|playstation/i.test(e.gamepad.id);
+      ind.textContent = (isDs ? 'DualSense PS5 Connected' : 'Controller Connected') + ' · Full UI & Settings Control Active';
+    }
+    showToast('Controller Connected — Full PS5 UI & Settings Control Ready', '#38bdf8');
+  });
+
+  // Live Gamepad API polling (DualSense / Xbox controller controls the ENTIRE PS5 UI + ALL Settings tabs!)
   let padCooldown = 0;
+  let padHCooldown = 0;
   const padPrev = new Array(20).fill(false);
   function pollControllerNav(now) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -2092,33 +2421,117 @@
     const ind = document.getElementById('ps5PadIndicator');
     if (gp) {
       const isDs = /dualsense|054c|wireless controller|playstation/i.test(gp.id);
-      if (ind) ind.textContent = (isDs ? 'DualSense PS5 Connected' : 'Controller Connected') + ' · Full UI Control Active';
+      if (ind) ind.textContent = (isDs ? 'DualSense PS5 Connected' : 'Controller Connected') + ' · Full UI & Settings Control Active';
 
-      const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+      const { btn: b, dUp, dDown, dLeft, dRight } = readPadDirections(gp);
       const just = (i) => b(i) && !padPrev[i];
-      const lx = gp.axes[0] || 0;
-      const ly = gp.axes[1] || 0;
 
       if (appState.bootStage < 4) {
         if (just(0) || just(9) || just(16)) setBootStage(appState.bootStage + 1);
       } else if (appState.modalOpen) {
-        if (just(0) || just(1)) closeModal();
-      } else if (appState.settingsOpen) {
-        if (just(1)) { playPs5Sfx('back'); closeSettings(); }
-        if ((b(13) || ly > 0.55) && now - padCooldown > 170) {
-          padCooldown = now; playPs5Sfx('nav');
-          appState.activeSettingCat = (appState.activeSettingCat + 1) % SETTINGS_CATS.length;
-          renderSettingsSidebar(); renderSettingsDetail();
+        const mBtns = getModalButtons();
+        if (just(1)) closeModal();
+        else if (just(0)) {
+          if (mBtns[appState.modalBtnIdx]) mBtns[appState.modalBtnIdx].click();
+          else closeModal();
+        } else if (dRight && now - padHCooldown > 170 && mBtns.length > 1) {
+          padHCooldown = now; playPs5Sfx('nav');
+          appState.modalBtnIdx = (appState.modalBtnIdx + 1) % mBtns.length; applyModalFocus();
+        } else if (dLeft && now - padHCooldown > 170 && mBtns.length > 1) {
+          padHCooldown = now; playPs5Sfx('nav');
+          appState.modalBtnIdx = (appState.modalBtnIdx - 1 + mBtns.length) % mBtns.length; applyModalFocus();
         }
-        if ((b(12) || ly < -0.55) && now - padCooldown > 170) {
-          padCooldown = now; playPs5Sfx('nav');
+      } else if (appState.settingsOpen) {
+        // L1 / R1 switches Settings category from anywhere inside Settings!
+        if (just(4)) {
+          playPs5Sfx('nav');
           appState.activeSettingCat = (appState.activeSettingCat - 1 + SETTINGS_CATS.length) % SETTINGS_CATS.length;
-          renderSettingsSidebar(); renderSettingsDetail();
+          appState.settingsItemIdx = 0;
+          renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+        } else if (just(5)) {
+          playPs5Sfx('nav');
+          appState.activeSettingCat = (appState.activeSettingCat + 1) % SETTINGS_CATS.length;
+          appState.settingsItemIdx = 0;
+          renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+        } else if (appState.settingsFocusArea === 'pane') {
+          const ctrls = getSettingsPaneControls();
+          const cur = ctrls[appState.settingsItemIdx];
+          if (just(1)) {
+            if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+              document.activeElement.blur();
+            }
+            playPs5Sfx('back');
+            appState.settingsFocusArea = 'sidebar';
+            applySettingsFocus();
+          } else if (just(0)) {
+            activatePs5Control(cur);
+          } else if (dDown && now - padCooldown > 155 && ctrls.length) {
+            padCooldown = now; playPs5Sfx('nav');
+            appState.settingsItemIdx = (appState.settingsItemIdx + 1) % ctrls.length;
+            applySettingsFocus();
+          } else if (dUp && now - padCooldown > 155 && ctrls.length) {
+            padCooldown = now; playPs5Sfx('nav');
+            appState.settingsItemIdx = (appState.settingsItemIdx - 1 + ctrls.length) % ctrls.length;
+            applySettingsFocus();
+          } else if (dRight && now - padHCooldown > 130) {
+            padHCooldown = now;
+            adjustPs5Control(cur, 1, false);
+          } else if (dLeft && now - padHCooldown > 130) {
+            padHCooldown = now;
+            if (!adjustPs5Control(cur, -1, false)) {
+              playPs5Sfx('back');
+              appState.settingsFocusArea = 'sidebar';
+              applySettingsFocus();
+            }
+          }
+        } else {
+          // Sidebar focus
+          if (just(1)) { playPs5Sfx('back'); closeSettings(); }
+          else if (just(0) || (dRight && now - padHCooldown > 180)) {
+            padHCooldown = now;
+            enterSettingsPane();
+          } else if (dDown && now - padCooldown > 165) {
+            padCooldown = now; playPs5Sfx('nav');
+            appState.activeSettingCat = (appState.activeSettingCat + 1) % SETTINGS_CATS.length;
+            appState.settingsItemIdx = 0;
+            renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+          } else if (dUp && now - padCooldown > 165) {
+            padCooldown = now; playPs5Sfx('nav');
+            appState.activeSettingCat = (appState.activeSettingCat - 1 + SETTINGS_CATS.length) % SETTINGS_CATS.length;
+            appState.settingsItemIdx = 0;
+            renderSettingsSidebar(); renderSettingsDetail(); applySettingsFocus();
+          }
         }
       } else {
-        if ((b(15) || lx > 0.55) && now - padCooldown > 180) { padCooldown = now; selectItem(appState.selectedIdx + 1, true); }
-        if ((b(14) || lx < -0.55) && now - padCooldown > 180) { padCooldown = now; selectItem(appState.selectedIdx - 1, true); }
-        if (just(0)) launchSelectedItem(); // Cross / A
+        // Home Screen: Track <-> Action Buttons (Play Game / Options / Trophies)
+        if (dDown && appState.homeFocusZone === 'track' && now - padCooldown > 180) {
+          padCooldown = now; playPs5Sfx('nav');
+          appState.homeFocusZone = 'actions'; appState.homeActionIdx = 0; applyHomeActionFocus();
+        } else if (dUp && appState.homeFocusZone === 'actions' && now - padCooldown > 180) {
+          padCooldown = now; playPs5Sfx('nav');
+          appState.homeFocusZone = 'track'; applyHomeActionFocus();
+        } else if (dRight && now - padCooldown > 175) {
+          padCooldown = now;
+          if (appState.homeFocusZone === 'actions') {
+            const btns = getHomeActionButtons();
+            if (btns.length) { playPs5Sfx('nav'); appState.homeActionIdx = (appState.homeActionIdx + 1) % btns.length; applyHomeActionFocus(); }
+          } else selectItem(appState.selectedIdx + 1, true);
+        } else if (dLeft && now - padCooldown > 175) {
+          padCooldown = now;
+          if (appState.homeFocusZone === 'actions') {
+            const btns = getHomeActionButtons();
+            if (btns.length) { playPs5Sfx('nav'); appState.homeActionIdx = (appState.homeActionIdx - 1 + btns.length) % btns.length; applyHomeActionFocus(); }
+          } else selectItem(appState.selectedIdx - 1, true);
+        }
+        if (just(0)) {
+          if (appState.homeFocusZone === 'actions') {
+            const btns = getHomeActionButtons();
+            if (btns[appState.homeActionIdx]) btns[appState.homeActionIdx].click();
+          } else launchSelectedItem();
+        }
+        if (just(1) && appState.homeFocusZone === 'actions') {
+          playPs5Sfx('back'); appState.homeFocusZone = 'track'; applyHomeActionFocus();
+        }
         if (just(3)) document.getElementById('btnSearch').click(); // Triangle / Y
         if (just(9)) { playPs5Sfx('confirm'); openSettings(0); } // Options / Start
         if (just(4)) document.getElementById('tabGames').click(); // L1

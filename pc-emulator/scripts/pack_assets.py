@@ -12,7 +12,11 @@ from collections import deque
 if os.path.isdir("/tmp/py-env") and "/tmp/py-env" not in sys.path:
     sys.path.insert(0, "/tmp/py-env")
 
-from PIL import Image, ImageOps
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMG_SRC = REPO_ROOT / "image-search"
@@ -21,7 +25,7 @@ WEB_DIR = REPO_ROOT / "pc-emulator" / "web"
 HEADER_OUT = REPO_ROOT / "pc-emulator" / "src" / "embedded_assets.h"
 
 
-def trim_alpha(im: Image.Image, pad: int = 4) -> Image.Image:
+def trim_alpha(im, pad: int = 4) :
     im = im.convert("RGBA")
     bbox = im.getbbox()
     if not bbox:
@@ -34,7 +38,7 @@ def trim_alpha(im: Image.Image, pad: int = 4) -> Image.Image:
     return im.crop((x0, y0, x1, y1))
 
 
-def trim_black_bars(im: Image.Image, threshold: int = 16) -> Image.Image:
+def trim_black_bars(im, threshold: int = 16) :
     rgb = im.convert("RGB")
     w, h = rgb.size
     px = rgb.load()
@@ -63,7 +67,7 @@ def trim_black_bars(im: Image.Image, threshold: int = 16) -> Image.Image:
     return im.crop((left, top, right + 1, bottom + 1))
 
 
-def flood_remove_white_bg(im: Image.Image, tol: int = 235) -> Image.Image:
+def flood_remove_white_bg(im, tol: int = 235) :
     """Flood-fills outer white background to transparent while preserving interior white letters."""
     rgba = im.convert("RGBA")
     w, h = rgba.size
@@ -105,7 +109,7 @@ def flood_remove_white_bg(im: Image.Image, tol: int = 235) -> Image.Image:
     return trim_alpha(rgba)
 
 
-def recolor_dark_ink_logo(im: Image.Image, color=(232, 200, 114)) -> Image.Image:
+def recolor_dark_ink_logo(im, color=(232, 200, 114)) :
     """Converts a dark-ink-on-white logo into a crisp colored transparent RGBA logo."""
     gray = im.convert("L")
     w, h = gray.size
@@ -121,7 +125,7 @@ def recolor_dark_ink_logo(im: Image.Image, color=(232, 200, 114)) -> Image.Image
     return trim_alpha(out)
 
 
-def invert_alpha_logo_to_white(im: Image.Image) -> Image.Image:
+def invert_alpha_logo_to_white(im) :
     """Turns a black-ink transparent PNG logo into crisp white-on-transparent PNG."""
     rgba = im.convert("RGBA")
     w, h = rgba.size
@@ -150,7 +154,7 @@ def save_hero(src: Path, out: Path, w: int = 1024, h: int = 576, quality: int = 
     im.save(out, "JPEG", quality=quality, optimize=True)
 
 
-def save_logo(im: Image.Image, out: Path, max_w: int = 440, max_h: int = 180):
+def save_logo(im, out: Path, max_w: int = 440, max_h: int = 180):
     im = trim_alpha(im)
     im.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
     im.save(out, "PNG", optimize=True)
