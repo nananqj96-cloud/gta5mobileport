@@ -244,7 +244,8 @@ inline std::wstring GetConfigFilePath() {
 }
 
 inline void SaveConfig(const EmulatorConfig& cfg) {
-    std::ofstream f(std::filesystem::path(GetConfigFilePath()));
+    std::filesystem::path cfgPath(GetConfigFilePath());
+    std::ofstream f(cfgPath);
     if (!f.is_open()) return;
     f << "preset=" << cfg.preset << "\n";
     f << "resIndex=" << cfg.resIndex << "\n";
@@ -260,7 +261,8 @@ inline void SaveConfig(const EmulatorConfig& cfg) {
 }
 
 inline void LoadConfig(EmulatorConfig& cfg) {
-    std::ifstream f(std::filesystem::path(GetConfigFilePath()));
+    std::filesystem::path cfgPath(GetConfigFilePath());
+    std::ifstream f(cfgPath);
     if (!f.is_open()) return;
     std::string line;
     while (std::getline(f, line)) {
