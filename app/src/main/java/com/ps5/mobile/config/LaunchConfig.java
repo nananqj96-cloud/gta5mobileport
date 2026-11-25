@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.util.DisplayMetrics;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -23,7 +25,7 @@ public final class LaunchConfig {
     private static final String KEY_LOW_END = "low_end_mode";
     private static final String KEY_GFX_PRESET = "gfx_preset";
     private static final String KEY_RENDER_DIST = "render_distance"; // -1 = Default, 0..100
-    private static final String KEY_RES_SCALE = "res_scale_pct";     // 40..100
+    private static final String KEY_RES_SCALE = "res_scale_pct";     // 35..100
     private static final String KEY_SHADOWS = "shadows_level";       // -1=Off, 0=Lowest, 1=Normal, 2=High
     private static final String KEY_FPS_CAP = "fps_cap";             // 30, 60, 0 (uncapped)
     private static final String KEY_DBG_DRAWS = "dbg_draws";
@@ -106,12 +108,6 @@ public final class LaunchConfig {
         return Math.max(2, Runtime.getRuntime().availableProcessors());
     }
 
-    public static boolean isLowEndDefault(Context ctx) {
-        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (sp.contains(KEY_LOW_END)) return sp.getBoolean(KEY_LOW_END, false);
-        return readTotalRamMb(ctx) <= 4600L;
-    }
-
     public static int defaultScaleForPreset(int preset) {
         switch (preset) {
             case PRESET_POTATO: return 45;
@@ -162,7 +158,8 @@ public final class LaunchConfig {
                 .edit().putInt(KEY_RENDER_DIST, val).apply();
     }
 
-    public static void saveAdvancedGraphics(Context ctx, int preset, int resScalePct, int shadows, int fpsCap, int renderDistance, boolean lowEnd, boolean debugDraws) {
+    public static void saveAdvancedGraphics(Context ctx, int preset, int resScalePct, int shadows,
+                                            int fpsCap, int renderDistance, boolean lowEnd, boolean debugDraws) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putInt(KEY_GFX_PRESET, Math.max(PRESET_POTATO, Math.min(PRESET_HIGH, preset)))
                 .putInt(KEY_RES_SCALE, Math.max(35, Math.min(100, resScalePct)))
@@ -183,12 +180,32 @@ public final class LaunchConfig {
                 .apply();
     }
 
+    public static void applyPartialJson(Context ctx, JSONObject obj) {
+        if (obj == null) return;
+        SharedPreferences.Editor ed = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        if (obj.has("lowEndMode")) ed.putBoolean(KEY_LOW_END, obj.optBoolean("lowEndMode"));
+        if (obj.has("graphicsPreset")) ed.putInt(KEY_GFX_PRESET, Math.max(0, Math.min(4, obj.optInt("graphicsPreset"))));
+        if (obj.has("renderDistance")) {
+            int rd = obj.optInt("renderDistance", -1);
+            ed.putInt(KEY_RENDER_DIST, rd < 0 ? -1 : Math.max(0, Math.min(100, rd)));
+        }
+        if (obj.has("resScalePct")) ed.putInt(KEY_RES_SCALE, Math.max(35, Math.min(100, obj.optInt("resScalePct", 75))));
+        if (obj.has("shadowsLevel")) ed.putInt(KEY_SHADOWS, Math.max(-1, Math.min(2, obj.optInt("shadowsLevel", -1))));
+        if (obj.has("fpsCap")) ed.putInt(KEY_FPS_CAP, obj.optInt("fpsCap", 30));
+        if (obj.has("debugDraws")) ed.putBoolean(KEY_DBG_DRAWS, obj.optBoolean("debugDraws"));
+        if (obj.has("statsEnabled")) ed.putBoolean(KEY_STATS_ON, obj.optBoolean("statsEnabled"));
+        if (obj.has("statsShowFps")) ed.putBoolean(KEY_STATS_FPS, obj.optBoolean("statsShowFps"));
+        if (obj.has("statsShowCpuGpu")) ed.putBoolean(KEY_STATS_CPUGPU, obj.optBoolean("statsShowCpuGpu"));
+        if (obj.has("statsShowRam")) ed.putBoolean(KEY_STATS_RAM, obj.optBoolean("statsShowRam"));
+        ed.apply();
+    }
+
     public static LaunchConfig load(Context ctx) {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long ramMb = readTotalRamMb(ctx);
         int cores = readCpuCores();
 
-        boolean lowEnd = sp.contains(KEY_LOW_END) ? sp.getBoolean(KEY_LOW_END, false) : (ramMb <= 4600L);
+        boolean lowEnd = sp.contains(KEY_LOW_END) ? sp.getBoolean(KEY_LOW_END, false) : (ramMb <= 6400L);
         int preset = sp.getInt(KEY_GFX_PRESET, lowEnd ? PRESET_ULTRA_LOW : PRESET_LOW);
         int renderDist = sp.getInt(KEY_RENDER_DIST, -1); // Default = GTA V engine default
         int scalePct = sp.getInt(KEY_RES_SCALE, defaultScaleForPreset(preset));
@@ -206,7 +223,6 @@ public final class LaunchConfig {
         int shortSide = Math.max(1, Math.min(dm.widthPixels, dm.heightPixels));
         float aspect = Math.max(1.5f, Math.min(2.25f, (float) longSide / (float) shortSide));
 
-        // Base height scaled by user's selected resolution scale (fixes playgta5.com high default resolution!)
         int baseH = lowEnd ? 720 : (ramMb >= 7500L ? 810 : 720);
         int targetH = Math.max(300, Math.round((baseH * (scalePct / 100f)) / 2f) * 2);
         int targetW = Math.max(480, Math.round((targetH * aspect) / 2f) * 2);
@@ -223,12 +239,15 @@ public final class LaunchConfig {
     }
 
     /**
-     * Builds the tuned playgta5.com URL passing real RAGE engine graphics & LOD flags
-     * directly via ?args= (bypassing GTA V's pause menu minimum floor).
+     * Builds the tuned runtime URL (either http://localhost:<PORT>/ via our COOP/COEP Chrome proxy
+     * or https://playgta5.com/) with real RAGE engine graphics & render-distance arguments.
      */
-    public String buildGameUrl(String launchMode) {
+    public String buildGameUrl(String baseOrigin, String launchMode) {
+        String root = (baseOrigin == null || baseOrigin.isEmpty()) ? "https://playgta5.com/" : baseOrigin;
+        if (!root.endsWith("/")) root = root + "/";
+
         boolean engineLowProfile = lowEndMode || graphicsPreset <= PRESET_LOW;
-        Uri.Builder b = Uri.parse("https://playgta5.com/").buildUpon();
+        Uri.Builder b = Uri.parse(root).buildUpon();
 
         b.appendQueryParameter("low", engineLowProfile ? "1" : "0");
         b.appendQueryParameter("fps", String.valueOf(fpsCap));
@@ -253,14 +272,14 @@ public final class LaunchConfig {
             b.appendQueryParameter("map", "env_test");
         }
 
-        // Real GTA V PC SettingsManager.cpp command-line arguments!
+        // Real GTA V PC SettingsManager.cpp command-line arguments (fixes playgta5.com graphics floor!)
         List<String> args = new ArrayList<>();
         int texQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int shaderQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int reflQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int partQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int grassQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int postFx = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
+        int shaderQ = texQ;
+        int reflQ = texQ;
+        int partQ = texQ;
+        int grassQ = texQ;
+        int postFx = texQ;
         int waterQ = graphicsPreset >= PRESET_HIGH ? 1 : 0;
         int aniso = graphicsPreset >= PRESET_HIGH ? 4 : (graphicsPreset == PRESET_MEDIUM ? 2 : 0);
 
@@ -291,7 +310,7 @@ public final class LaunchConfig {
             args.add("-vehicleVariety=0");
         }
 
-        // Render Distance override: -1 = leave at GTA V engine default, 0..100 = exact LOD/streaming scaling!
+        // Render Distance override: -1 = leave at GTA V engine default, 0..100 = exact LOD/streaming scaling
         if (renderDistance >= 0) {
             float lod = Math.max(0.0f, Math.min(1.0f, renderDistance / 100.0f));
             String lodStr = String.format(Locale.US, "%.2f", lod);
@@ -315,27 +334,30 @@ public final class LaunchConfig {
         return b.build().toString();
     }
 
+    public String buildGameUrl(String launchMode) {
+        return buildGameUrl("https://playgta5.com/", launchMode);
+    }
+
     public String buildSettingsXmlJson() {
         int texQ = graphicsPreset >= PRESET_HIGH ? 2 : (graphicsPreset == PRESET_MEDIUM ? 1 : 0);
-        int shaderQ = texQ;
-        int grassQ = texQ;
-        int postFx = texQ;
-        int reflQ = texQ;
         int waterQ = graphicsPreset >= PRESET_HIGH ? 1 : 0;
         double lod = renderDistance >= 0 ? (renderDistance / 100.0) : (graphicsPreset <= PRESET_ULTRA_LOW ? 0.0 : -1.0);
         return String.format(Locale.US,
                 "{\"shadowQuality\":%d,\"textureQuality\":%d,\"shaderQuality\":%d,\"grassQuality\":%d,\"postFx\":%d,\"reflectionQuality\":%d,\"waterQuality\":%d,\"tessellation\":0,\"lodScale\":%.3f}",
-                shadowsLevel, texQ, shaderQ, grassQ, postFx, reflQ, waterQ, lod);
+                shadowsLevel, texQ, texQ, texQ, texQ, texQ, waterQ, lod);
+    }
+
+    public String toConfigJson() {
+        return String.format(Locale.US,
+                "{\"lowEndMode\":%b,\"graphicsPreset\":%d,\"renderDistance\":%d,\"resScalePct\":%d,\"shadowsLevel\":%d,\"fpsCap\":%d,\"debugDraws\":%b,\"statsEnabled\":%b,\"statsShowFps\":%b,\"statsShowCpuGpu\":%b,\"statsShowRam\":%b,\"renderWidth\":%d,\"renderHeight\":%d,\"settingsXml\":%s}",
+                lowEndMode, graphicsPreset, renderDistance, resScalePct, shadowsLevel, fpsCap, debugDraws,
+                statsEnabled, statsShowFps, statsShowCpuGpu, statsShowRam,
+                renderWidth, renderHeight, buildSettingsXmlJson());
     }
 
     public String getDeviceSpecSummary() {
         double gb = totalRamMb / 1024.0;
         return String.format(Locale.US, "%.1f GB RAM · %d CORES", gb, cpuCores);
-    }
-
-    public String getRenderDistanceLabel() {
-        if (renderDistance < 0) return "DEFAULT";
-        return String.valueOf(renderDistance);
     }
 
     public String getProfileSummary() {
@@ -348,7 +370,7 @@ public final class LaunchConfig {
     public String getPs5HomeSubtitle() {
         String rd = renderDistance < 0 ? "Default" : (renderDistance + "/100");
         String sh = shadowsLevel < 0 ? "Shadows OFF" : ("Shadows " + shadowsLevel);
-        return String.format(Locale.US, "Graphics: %s (%s · %dp) · Render Distance: %s",
+        return String.format(Locale.US, "Chrome 64-bit COOP/COEP · %s (%s · %dp) · RD %s",
                 PRESET_SHORT[graphicsPreset], sh, renderHeight, rd);
     }
 

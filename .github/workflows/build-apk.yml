@@ -49,6 +49,7 @@ jobs:
         run: |
           "$BUILD_TOOLS/aapt2" dump badging releases/PS5-Mobile.apk
           node --check app/src/main/assets/mobile_bridge.js
+          node --check app/src/main/assets/ps5_game_overlay.js
 
       - name: Upload CI-Compiled APK Artifact
         uses: actions/upload-artifact@v4

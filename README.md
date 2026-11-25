@@ -5,7 +5,13 @@ A lightweight, hardware-accelerated Android app branded as a PlayStation 5 mobil
 ## Prebuilt Signed APK
 
 - **CI-Compiled Signed APK:** [`releases/PS5-Mobile.apk`](releases/PS5-Mobile.apk)
-- **Package ID:** `com.ps5.mobile` · Version `2.0.0` · Android 8.0+ (`minSdk 26`, `targetSdk 34`)
+- **Package ID:** `com.ps5.mobile` · Version `2.1.0` (`versionCode 3`) · Android 8.0+ (`minSdk 26`, `targetSdk 34`)
+
+## Real-Device COOP/COEP + Memory Fix (v2.1.0)
+
+- **Why WebView failed:** Android System WebView never sets `window.crossOriginIsolated = true` (`crbug.com/40914606`) and restricts single-renderer virtual memory — causing `"not cross-origin isolated"` and `"no memory"` errors even when `playgta5.com` works directly in Chrome on the same phone.
+- **How v2.1.0 fixes both:** Pressing **Play Game** starts a lightweight Foreground Service (`RuntimeProxyService`) running an embedded localhost-only reverse proxy (`LocalPlayProxyServer` on `http://localhost:19555`), releases PS5 Home WebView memory to free RAM, and launches `http://localhost:19555/?...` inside **Chrome's 64-bit WebGPU engine (Chrome Custom Tab)** with guaranteed `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, and `Cross-Origin-Resource-Policy: same-origin` headers.
+- **Full In-Chrome PS5 Overlay (`assets/ps5_game_overlay.js`):** Served from `/__ps5/overlay.js` into the Chrome Custom Tab, providing Multi-Touch Controls (Foot/Drive/Fly + Fullscreen Landscape), Draggable Floating **`D`** Developer Trainer (Vehicles, Weapons, Fly, Cheats, Graphics & Render Distance), and Live Android Hardware Stats HUD (WebGPU FPS + real Android CPU/GPU/RAM telemetry from `/__ps5/api/stats`, synced live with Android `LaunchConfig` via `/__ps5/api/settings`).
 
 ## Key Features
 
