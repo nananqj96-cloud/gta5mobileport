@@ -67,6 +67,11 @@ public final class GameInputBridge {
         eval("window.__ps5Nav&&window.__ps5Nav.setProfileSummary('" + escapeJs(summary) + "')");
     }
 
+    public void ps5SetUltraBadge(boolean ultraOn, String badgeText) {
+        eval("window.__ps5Nav&&window.__ps5Nav.setUltraBadge&&window.__ps5Nav.setUltraBadge("
+                + (ultraOn ? "true" : "false") + ",'" + escapeJs(badgeText) + "')");
+    }
+
     public void ps5ResetBoot() {
         eval("window.__ps5Nav&&window.__ps5Nav.resetBoot()");
     }
@@ -139,6 +144,10 @@ public final class GameInputBridge {
 
     public void syncSettingsXml(String jsonConfig) {
         eval("window.__gtaMobile&&window.__gtaMobile.syncSettingsXml(" + jsonConfig + ")");
+    }
+
+    public void triggerMemoryTrim() {
+        eval("window.__gtaMobile&&window.__gtaMobile.triggerMemoryTrim&&window.__gtaMobile.triggerMemoryTrim()");
     }
 
     public void releaseAll() {

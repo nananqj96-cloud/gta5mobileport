@@ -28,6 +28,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import com.ps5.mobile.bridge.GameInputBridge;
 import com.ps5.mobile.bridge.WebViewIsolationBridge;
@@ -59,6 +60,9 @@ import java.util.regex.Pattern;
  *        + Live Hardware Stats HUD (FPS / CPU / GPU / RAM) — ZERO external browser, ALWAYS landscape!
  */
 public final class GameActivity extends Activity {
+
+    public static final String EXTRA_DIRECT_LAUNCH = "ps5_direct_launch";
+    public static final String EXTRA_LAUNCH_MODE = "ps5_launch_mode";
 
     private static final String TAG = "Ps5GameActivity";
     private static final String PS5_HOME_URL = "file:///android_asset/ps5_ui/index.html";
@@ -92,6 +96,7 @@ public final class GameActivity extends Activity {
         bridgeScript = readAssetText("mobile_bridge.js");
         isolationBridge = new WebViewIsolationBridge();
         isolationBridge.setBcDecodeScript(readAssetText("bc_decode.js"));
+        isolationBridge.setLaunchConfig(config);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyImmersiveFullscreen();
@@ -121,9 +126,9 @@ public final class GameActivity extends Activity {
             }
 
             @Override
-            public void onReloadGame(boolean forcePotatoLowEnd) {
-                if (forcePotatoLowEnd) {
-                    LaunchConfig.saveGraphicsPreset(GameActivity.this, LaunchConfig.PRESET_POTATO);
+            public void onReloadGame(boolean forceUltraExtreme) {
+                if (forceUltraExtreme) {
+                    LaunchConfig.activateEmergencyUltraExtreme(GameActivity.this);
                     config = LaunchConfig.load(GameActivity.this);
                 }
                 launchGtaRuntime(lastLaunchMode);
@@ -132,6 +137,11 @@ public final class GameActivity extends Activity {
             @Override
             public void onClearCacheAndReload() {
                 clearCacheAndReload();
+            }
+
+            @Override
+            public void onTriggerMemoryTrim() {
+                triggerLiveMemoryTrim(true);
             }
 
             @Override
@@ -182,6 +192,11 @@ public final class GameActivity extends Activity {
             }
 
             @Override
+            public void onTriggerMemoryTrim() {
+                triggerLiveMemoryTrim(true);
+            }
+
+            @Override
             public void onReturnToPs5Home() {
                 enterPs5Home();
             }
@@ -190,14 +205,14 @@ public final class GameActivity extends Activity {
         root.addView(trainerOverlay, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 5. Floating Hardware Statistics Viewer HUD (FPS / CPU / GPU / RAM)
+        // 5. Floating Hardware Statistics Viewer HUD (FPS / CPU / GPU / VRAM / RAM)
         statsHud = new StatsHudView(this);
         statsHud.applyVisibility(config.statsEnabled, config.statsShowFps, config.statsShowCpuGpu, config.statsShowRam);
         root.addView(statsHud, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL));
 
-        // 6. PS5 System Settings & Telemetry Overlay (topmost modal)
+        // 6. PS5 System Settings & Ultra Optimize Overlay (topmost modal)
         settingsOverlay = new Ps5SettingsOverlay(this, new Ps5SettingsOverlay.Callback() {
             @Override
             public void onStatsSettingsChanged(boolean enabled, boolean fps, boolean cpuGpu, boolean ram) {
@@ -208,11 +223,18 @@ public final class GameActivity extends Activity {
             @Override
             public void onGraphicsSettingsChanged(boolean reloadGameIfRunning) {
                 config = LaunchConfig.load(GameActivity.this);
+                isolationBridge.setLaunchConfig(config);
                 if (!inGameMode) {
                     inputBridge.ps5SetProfileSummary(config.getPs5HomeSubtitle());
+                    inputBridge.ps5SetUltraBadge(config.ultraOptimize, config.getUltraBadgeLabel());
                 } else if (reloadGameIfRunning) {
                     launchGtaRuntime(lastLaunchMode);
                 }
+            }
+
+            @Override
+            public void onTriggerMemoryTrim() {
+                triggerLiveMemoryTrim(true);
             }
 
             @Override
@@ -225,12 +247,18 @@ public final class GameActivity extends Activity {
 
         setContentView(root);
 
-        // Start real-time Android CPU/GPU/RAM/FPS telemetry sampler
+        // Start real-time Android CPU/GPU/VRAM/RAM/FPS telemetry sampler
         statsMonitor = new StatsMonitor(this, snap -> runOnUiThread(() -> statsHud.update(snap)));
         statsMonitor.start();
 
-        // Boot straight into the horizontal PS5 Home Screen
-        enterPs5Home();
+        // Direct Boot mode bypasses PS5 Home WebView entirely to save ~150MB RAM on low-RAM phones!
+        boolean directLaunch = getIntent().getBooleanExtra(EXTRA_DIRECT_LAUNCH, false) || config.skipPs5Home;
+        String intentMode = getIntent().getStringExtra(EXTRA_LAUNCH_MODE);
+        if (directLaunch) {
+            launchGtaRuntime(intentMode != null ? intentMode : "default");
+        } else {
+            enterPs5Home();
+        }
     }
 
     private void destroyActiveWebView() {
@@ -285,7 +313,8 @@ public final class GameActivity extends Activity {
             ws.setAllowFileAccess(false);
             ws.setAllowContentAccess(true);
             ws.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-            ws.setOffscreenPreRaster(true);
+            // Disable offscreen pre-rastering in Ultra Optimize Mode to cut GPU compositor VRAM!
+            ws.setOffscreenPreRaster(!config.ultraOptimize);
 
             // Clean Chrome UA (removes "; wv") for optimal WebGPU + desktop resolution support
             String rawUa = ws.getUserAgentString();
@@ -346,6 +375,7 @@ public final class GameActivity extends Activity {
                 super.onPageFinished(v, url);
                 if (!forGame && url != null && url.startsWith("file:///android_asset/ps5_ui/")) {
                     inputBridge.ps5SetProfileSummary(config.getPs5HomeSubtitle());
+                    inputBridge.ps5SetUltraBadge(config.ultraOptimize, config.getUltraBadgeLabel());
                     inputBridge.ps5ResetBoot();
                 } else if (forGame && url != null && url.contains("playgta5.com")) {
                     if (!isolationBridge.isDocumentStartSupported()) {
@@ -379,8 +409,8 @@ public final class GameActivity extends Activity {
                 runOnUiThread(() -> {
                     if (forGame && inGameMode) {
                         gameControlsOverlay.showError(crashed
-                                ? "WebGPU renderer ran out of memory or crashed.\nTap POTATO MODE to drop RAM/VRAM usage."
-                                : "Android reclaimed renderer memory.\nClose background apps and tap POTATO MODE.", false);
+                                ? "WebGPU renderer ran out of RAM/VRAM or crashed.\nTap ⚡ ULTRA EXTREME (270p · 128px BC Mip-Drop · 16MB IO) to force-run on low-RAM phones!"
+                                : "Android LMK reclaimed renderer memory.\nClose background apps and tap ⚡ ULTRA EXTREME (270p Survival Mode).", false);
                     } else {
                         enterPs5Home();
                     }
@@ -423,6 +453,8 @@ public final class GameActivity extends Activity {
         lastConsoleError = "";
         awaitingCacheClearReload = false;
         config = LaunchConfig.load(this);
+        isolationBridge.setLaunchConfig(config);
+        if (statsMonitor != null) statsMonitor.resetGpuTelemetry();
 
         inGameMode = true;
         ps5ControllerOverlay.setVisibility(View.GONE);
@@ -435,6 +467,20 @@ public final class GameActivity extends Activity {
         WebView gameWv = createConfiguredWebView(true);
         String targetUrl = config.buildGameUrl(lastLaunchMode);
         gameWv.loadUrl(targetUrl);
+    }
+
+    private void triggerLiveMemoryTrim(boolean notifyUser) {
+        if (inGameMode && inputBridge != null) {
+            inputBridge.triggerMemoryTrim();
+        }
+        if (activeWebView != null) {
+            try {
+                activeWebView.clearCache(false);
+            } catch (Throwable ignored) {}
+        }
+        if (notifyUser) {
+            Toast.makeText(this, "⚡ Flushed GPU BindGroups, Shader Packs & IO RAM Cache", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void clearCacheAndReload() {
@@ -520,6 +566,9 @@ public final class GameActivity extends Activity {
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE && inGameMode && inputBridge != null) {
+            inputBridge.triggerMemoryTrim();
+        }
         if (activeWebView != null && level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             activeWebView.clearCache(false);
         }
@@ -584,6 +633,18 @@ public final class GameActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void onGpuTelemetry(final int texMb, final int bufMb, final int savedMb, final int texCnt, final boolean ultraOn) {
+            if (statsMonitor != null) {
+                statsMonitor.setGpuTelemetry(texMb, bufMb, savedMb, texCnt, ultraOn);
+            }
+        }
+
+        @JavascriptInterface
+        public void onMemoryTrimmed() {
+            // Confirmed worker caches purged
+        }
+
+        @JavascriptInterface
         public void onProgress(final int pct, final String label) {
             // Legacy 2-arg hook
         }
@@ -611,7 +672,7 @@ public final class GameActivity extends Activity {
                     if (diag.length() > 140) diag = diag.substring(0, 140) + "…";
                     sb.append("\nLog: ").append(diag);
                 }
-                sb.append("\nTap WAIT to keep streaming, CLEAR CACHE to reset corrupt stream cache, or POTATO MODE.");
+                sb.append("\nTap WAIT to keep streaming, CLEAR CACHE to reset corrupt stream cache, or ⚡ ULTRA EXTREME.");
                 gameControlsOverlay.showStallWarning(sb.toString());
             });
         }
@@ -682,7 +743,7 @@ public final class GameActivity extends Activity {
                 } else if (lower.contains("no memory") || lower.contains("out of memory")) {
                     gameControlsOverlay.showError(
                             "Not enough free RAM/VRAM for current graphics tier.\n"
-                                    + "Close other apps and tap POTATO MODE (minimal VRAM + 2 worker cores).",
+                                    + "Close background apps and tap ⚡ ULTRA EXTREME (270p · 128px BC Mip-Drop · 16MB IO).",
                             false);
                 } else {
                     gameControlsOverlay.showError(msg, false);

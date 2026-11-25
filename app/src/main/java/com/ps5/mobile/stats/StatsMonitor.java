@@ -30,9 +30,15 @@ public final class StatsMonitor {
         public final long usedRamMb;
         public final long totalRamMb;
         public final int appPssMb;
+        public final int vramTexMb;
+        public final int vramBufMb;
+        public final int vramSavedMb;
+        public final int texCount;
+        public final boolean ultraActive;
 
         Snapshot(int fps, int cpuPct, int cpuMhz, int gpuPct, boolean gpuDirect,
-                 long usedRamMb, long totalRamMb, int appPssMb) {
+                 long usedRamMb, long totalRamMb, int appPssMb,
+                 int vramTexMb, int vramBufMb, int vramSavedMb, int texCount, boolean ultraActive) {
             this.fps = fps;
             this.cpuPct = cpuPct;
             this.cpuMhz = cpuMhz;
@@ -41,6 +47,11 @@ public final class StatsMonitor {
             this.usedRamMb = usedRamMb;
             this.totalRamMb = totalRamMb;
             this.appPssMb = appPssMb;
+            this.vramTexMb = vramTexMb;
+            this.vramBufMb = vramBufMb;
+            this.vramSavedMb = vramSavedMb;
+            this.texCount = texCount;
+            this.ultraActive = ultraActive;
         }
     }
 
@@ -55,6 +66,11 @@ public final class StatsMonitor {
     private final int cpuCount;
 
     private volatile int currentFps = 0;
+    private volatile int vramTexMb = -1;
+    private volatile int vramBufMb = 0;
+    private volatile int vramSavedMb = 0;
+    private volatile int texCount = 0;
+    private volatile boolean ultraActive = false;
     private boolean running = false;
 
     private long prevTotalCpu = -1;
@@ -81,6 +97,21 @@ public final class StatsMonitor {
 
     public void setFps(int fps) {
         this.currentFps = Math.max(0, fps);
+    }
+
+    public void setGpuTelemetry(int texMb, int bufMb, int savedMb, int texCnt, boolean ultraOn) {
+        this.vramTexMb = Math.max(0, texMb);
+        this.vramBufMb = Math.max(0, bufMb);
+        this.vramSavedMb = Math.max(0, savedMb);
+        this.texCount = Math.max(0, texCnt);
+        this.ultraActive = ultraOn;
+    }
+
+    public void resetGpuTelemetry() {
+        this.vramTexMb = -1;
+        this.vramBufMb = 0;
+        this.vramSavedMb = 0;
+        this.texCount = 0;
     }
 
     public void start() {
@@ -120,7 +151,8 @@ public final class StatsMonitor {
             pssMb = dmi.getTotalPss() / 1024;
         } catch (Throwable ignored) {}
 
-        return new Snapshot(currentFps, cpuPct, cpuMhz, gpuDirectVal, hasGpu, usedMb, totalMb, pssMb);
+        return new Snapshot(currentFps, cpuPct, cpuMhz, gpuDirectVal, hasGpu, usedMb, totalMb, pssMb,
+                vramTexMb, vramBufMb, vramSavedMb, texCount, ultraActive);
     }
 
     private int readSystemCpuPct() {

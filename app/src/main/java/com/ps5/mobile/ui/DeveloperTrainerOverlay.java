@@ -35,6 +35,7 @@ public final class DeveloperTrainerOverlay extends FrameLayout {
         void onSwitchToFlyHud();
         void onReloadGameWithNewGraphics(String optionalLaunchMode);
         void onToggleStatsQuick();
+        void onTriggerMemoryTrim();
         void onReturnToPs5Home();
     }
 
@@ -426,6 +427,31 @@ public final class DeveloperTrainerOverlay extends FrameLayout {
     // ==================== TAB 3: GRAPHICS & RENDER DISTANCE ====================
     private void buildGraphicsTab() {
         Context ctx = getContext();
+        tabContent.addView(makeHint(ctx, "⚡ Ultra Optimize Engine — forces GTA V onto low-RAM / low-VRAM Android phones:"));
+
+        LinearLayout ultraRow = new LinearLayout(ctx);
+        ultraRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ulp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
+        ulp.bottomMargin = dp(8);
+        ultraRow.addView(makeFullBtn(ctx, "⚡ ULTRA 360p", 0xFF059669, () -> {
+            LaunchConfig.saveUltraOptimize(getContext(), true, LaunchConfig.ULTRA_BALANCED);
+            closeDrawer();
+            if (callback != null) callback.onReloadGameWithNewGraphics(null);
+        }), new LinearLayout.LayoutParams(0, dp(36), 1f));
+        ultraRow.addView(new View(ctx), new LinearLayout.LayoutParams(dp(5), 1));
+        ultraRow.addView(makeFullBtn(ctx, "🔥 EXTREME 270p", 0xFFD97706, () -> {
+            LaunchConfig.activateEmergencyUltraExtreme(getContext());
+            closeDrawer();
+            if (callback != null) callback.onReloadGameWithNewGraphics(null);
+        }), new LinearLayout.LayoutParams(0, dp(36), 1f));
+        ultraRow.addView(new View(ctx), new LinearLayout.LayoutParams(dp(5), 1));
+        ultraRow.addView(makeFullBtn(ctx, "⚡ FLUSH RAM", 0xFF0F766E, () -> {
+            if (callback != null) callback.onTriggerMemoryTrim();
+            showToast("⚡ Flushed GPU BindGroups & IO RAM Cache!");
+        }), new LinearLayout.LayoutParams(0, dp(36), 1f));
+        tabContent.addView(ultraRow, ulp);
+
         tabContent.addView(makeHint(ctx, "Real RAGE Engine overrides — unlocks lower graphics below GTA V's menu limit:"));
 
         // Presets

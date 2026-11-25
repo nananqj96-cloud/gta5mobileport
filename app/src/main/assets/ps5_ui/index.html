@@ -628,7 +628,10 @@
 
       <section class="ps_hero_row">
         <div class="ps_game_info">
-          <span class="gta_edition_tag">PS5 · WebGPU Hardware Runtime</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="gta_edition_tag">PS5 · WebGPU Hardware Runtime v3.0</span>
+            <span id="ultra-badge" style="display:none;padding:3px 9px;border-radius:999px;background:rgba(16,185,129,0.22);border:1px solid rgba(52,211,153,0.75);color:#6EE7B7;font-size:10px;font-weight:800;letter-spacing:0.08em;">⚡ ULTRA OPTIMIZE</span>
+          </div>
           <div class="gta_wordmark">
             <span class="gta_wordmark_main">Grand Theft Auto</span>
             <span class="gta_wordmark_v">V</span>
@@ -966,6 +969,19 @@
     setProfileSummary: function(text) {
       var el = document.getElementById('profile-summary');
       if (el) el.textContent = text;
+    },
+
+    setUltraBadge: function(ultraOn, label) {
+      var el = document.getElementById('ultra-badge');
+      if (el) {
+        el.style.display = ultraOn ? 'inline-block' : 'none';
+        if (label) el.textContent = '⚡ ' + label;
+      }
+      if (document.body) {
+        if (ultraOn) {
+          document.body.style.animation = 'none';
+        }
+      }
     },
 
     resetBoot: function() {

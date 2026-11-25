@@ -16,30 +16,36 @@ import android.widget.TextView;
 import com.ps5.mobile.config.LaunchConfig;
 
 /**
- * In-emulator PS5 System Settings modal accessible from both the PS5 Home Screen
- * and during GTA V gameplay. Hosts toggles for the Hardware Statistics Viewer
- * (FPS, CPU/GPU, RAM) plus Graphics Quality & Render Distance controls.
+ * In-emulator PS5 System Settings modal (v3.0 Ultra Optimize Edition):
+ * - Ultra Optimize Mode (ULTRA 360p / EXTREME 270p) + live VRAM savings readout + 1-tap RAM/VRAM Flush
+ * - Skip PS5 Home (Direct Boot) toggle
+ * - Hardware Statistics Viewer (FPS, CPU/GPU, VRAM, RAM)
+ * - Graphics Quality & Render Distance controls
  */
 public final class Ps5SettingsOverlay extends FrameLayout {
 
     public interface Callback {
         void onStatsSettingsChanged(boolean enabled, boolean fps, boolean cpuGpu, boolean ram);
         void onGraphicsSettingsChanged(boolean reloadGameIfRunning);
+        void onTriggerMemoryTrim();
         void onClosed();
     }
 
     private final Callback callback;
     private boolean inGameMode = false;
 
+    private boolean ultraOpt, skipHome, lowEnd;
+    private int ultraLevel;
     private boolean statsEnabled, statsFps, statsCpuGpu, statsRam;
     private int gfxPreset;
     private int renderDistance;
-    private boolean lowEnd;
 
-    private PremiumToggleSwitch swStatsAll, swStatsFps, swStatsCpuGpu, swStatsRam, swLowEnd;
+    private PremiumToggleSwitch swUltra, swSkipHome, swStatsAll, swStatsFps, swStatsCpuGpu, swStatsRam, swLowEnd;
+    private TextView chipUltra360, chipExtreme270, tvUltraSavings;
     private final TextView[] presetChips = new TextView[5];
     private SeekBar seekRd;
     private TextView tvRdVal;
+    private TextView btnFlushRam;
     private TextView btnApplyReload;
 
     public Ps5SettingsOverlay(Context context, Callback callback) {
@@ -56,7 +62,7 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         GradientDrawable cardBg = new GradientDrawable();
         cardBg.setColor(0xF50B142C);
         cardBg.setCornerRadius(dp(20));
-        cardBg.setStroke(dp(1), 0x6660A5FA);
+        cardBg.setStroke(dp(1), 0x6634D399);
         card.setBackground(cardBg);
         card.setPadding(dp(18), dp(14), dp(18), dp(14));
 
@@ -65,9 +71,9 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(context);
-        title.setText("PS5 SYSTEM SETTINGS");
+        title.setText("PS5 SYSTEM SETTINGS · v3.0");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(15f);
+        title.setTextSize(14.5f);
         title.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -78,17 +84,76 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         ScrollView scroll = new ScrollView(context);
         LinearLayout body = new LinearLayout(context);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(10), 0, dp(4));
+        body.setPadding(0, dp(8), 0, dp(4));
 
-        // SECTION 1: Performance Statistics Viewer
-        body.addView(makeSectionLabel(context, "HARDWARE STATISTICS OVERLAY"));
+        // SECTION 1: ULTRA OPTIMIZE ENGINE (LOW-VRAM / LOW-RAM FORCE RUNNER)
+        body.addView(makeSectionLabel(context, "⚡ ULTRA OPTIMIZE MODE (LOW-RAM / LOW-VRAM)", 0xFF34D399));
+
+        swUltra = new PremiumToggleSwitch(context);
+        body.addView(makeToggleRow(context, "Ultra Optimize Engine", "BC texture mip-drop · shrunk rings/arenas · tight IO RAM cap", swUltra, on -> {
+            ultraOpt = on;
+            LaunchConfig.saveUltraOptimize(getContext(), ultraOpt, ultraLevel);
+            syncFromSavedConfig(false);
+        }));
+
+        LinearLayout tierRow = new LinearLayout(context);
+        tierRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tlp.bottomMargin = dp(6);
+        tierRow.setLayoutParams(tlp);
+
+        chipUltra360 = makeTierChip(context, "⚡ ULTRA 360p (4GB)", () -> {
+            ultraOpt = true;
+            ultraLevel = LaunchConfig.ULTRA_BALANCED;
+            LaunchConfig.saveUltraOptimize(getContext(), true, LaunchConfig.ULTRA_BALANCED);
+            syncFromSavedConfig(false);
+        });
+        chipExtreme270 = makeTierChip(context, "🔥 EXTREME 270p (2-3GB)", () -> {
+            ultraOpt = true;
+            ultraLevel = LaunchConfig.ULTRA_EXTREME;
+            LaunchConfig.saveUltraOptimize(getContext(), true, LaunchConfig.ULTRA_EXTREME);
+            syncFromSavedConfig(false);
+        });
+        LinearLayout.LayoutParams c1 = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        c2.leftMargin = dp(6);
+        tierRow.addView(chipUltra360, c1);
+        tierRow.addView(chipExtreme270, c2);
+        body.addView(tierRow);
+
+        tvUltraSavings = new TextView(context);
+        tvUltraSavings.setTextColor(0xFF6EE7B7);
+        tvUltraSavings.setTextSize(10f);
+        tvUltraSavings.setTypeface(Typeface.MONOSPACE);
+        tvUltraSavings.setPadding(dp(4), 0, dp(4), dp(8));
+        body.addView(tvUltraSavings);
+
+        swSkipHome = new PremiumToggleSwitch(context);
+        body.addView(makeToggleRow(context, "Skip PS5 Home (Direct Boot)", "Boots straight into GTA V WebView · saves ~150MB RAM", swSkipHome, on -> {
+            skipHome = on;
+            LaunchConfig.saveSkipPs5Home(getContext(), on);
+            if (callback != null) callback.onGraphicsSettingsChanged(false);
+        }));
+
+        btnFlushRam = makeActionChip(context, "⚡ FLUSH GPU & IO RAM CACHES NOW (LIVE)", 0xFF047857, () -> {
+            if (callback != null) callback.onTriggerMemoryTrim();
+        });
+        btnFlushRam.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
+        flp.bottomMargin = dp(8);
+        body.addView(btnFlushRam, flp);
+
+        // SECTION 2: Performance Statistics Viewer
+        body.addView(makeSectionLabel(context, "HARDWARE STATISTICS OVERLAY", 0xFF60A5FA));
 
         swStatsAll = new PremiumToggleSwitch(context);
         swStatsFps = new PremiumToggleSwitch(context);
         swStatsCpuGpu = new PremiumToggleSwitch(context);
         swStatsRam = new PremiumToggleSwitch(context);
 
-        body.addView(makeToggleRow(context, "Show Statistics Viewer", "Live floating telemetry HUD on screen", swStatsAll, on -> {
+        body.addView(makeToggleRow(context, "Show Statistics Viewer", "Live floating FPS / CPU / VRAM / RAM HUD", swStatsAll, on -> {
             statsEnabled = on;
             persistAndNotifyStats();
         }));
@@ -96,7 +161,7 @@ public final class Ps5SettingsOverlay extends FrameLayout {
             statsFps = on;
             persistAndNotifyStats();
         }));
-        body.addView(makeToggleRow(context, "CPU / GPU Usage", "Live processor load, clock MHz & GPU sensor", swStatsCpuGpu, on -> {
+        body.addView(makeToggleRow(context, "CPU / GPU / VRAM Usage", "Live processor load, GPU sensor & VRAM saved", swStatsCpuGpu, on -> {
             statsCpuGpu = on;
             persistAndNotifyStats();
         }));
@@ -105,8 +170,8 @@ public final class Ps5SettingsOverlay extends FrameLayout {
             persistAndNotifyStats();
         }));
 
-        // SECTION 2: Graphics & Render Distance
-        body.addView(makeSectionLabel(context, "GRAPHICS & RENDER DISTANCE"));
+        // SECTION 3: Graphics & Render Distance
+        body.addView(makeSectionLabel(context, "GRAPHICS & RENDER DISTANCE", 0xFF60A5FA));
 
         LinearLayout presetRow = new LinearLayout(context);
         presetRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -124,13 +189,12 @@ public final class Ps5SettingsOverlay extends FrameLayout {
             chip.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 gfxPreset = idx;
-                if (idx <= LaunchConfig.PRESET_ULTRA_LOW) {
-                    lowEnd = true;
-                    swLowEnd.setChecked(true, true);
+                if (idx > LaunchConfig.PRESET_POTATO && ultraOpt) {
+                    ultraOpt = false;
+                    LaunchConfig.saveUltraOptimize(getContext(), false, ultraLevel);
                 }
                 LaunchConfig.saveGraphicsPreset(getContext(), gfxPreset);
-                refreshPresetChips();
-                if (callback != null) callback.onGraphicsSettingsChanged(false);
+                syncFromSavedConfig(false);
             });
             presetChips[i] = chip;
             presetRow.addView(chip);
@@ -186,15 +250,16 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         swLowEnd = new PremiumToggleSwitch(context);
         body.addView(makeToggleRow(context, "Low-End Phone Mode", "30 FPS cap · 2 cores · shadows off · reduced RAM", swLowEnd, on -> {
             lowEnd = on;
+            if (!on && ultraOpt) {
+                ultraOpt = false;
+                LaunchConfig.saveUltraOptimize(getContext(), false, ultraLevel);
+            }
             LaunchConfig.saveLowEndMode(getContext(), on);
-            LaunchConfig updated = LaunchConfig.load(getContext());
-            gfxPreset = updated.graphicsPreset;
-            refreshPresetChips();
-            if (callback != null) callback.onGraphicsSettingsChanged(false);
+            syncFromSavedConfig(false);
         }));
 
         // Bottom apply/reload row
-        btnApplyReload = makeActionChip(context, "APPLY GRAPHICS & RELOAD GAME", 0xFF0070D1, () -> {
+        btnApplyReload = makeActionChip(context, "APPLY SETTINGS & RELOAD GAME", 0xFF0070D1, () -> {
             hide();
             if (callback != null) callback.onGraphicsSettingsChanged(true);
         });
@@ -208,13 +273,23 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         card.addView(scroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        LayoutParams cardLp = new LayoutParams(dp(470), dp(310), Gravity.CENTER);
+        LayoutParams cardLp = new LayoutParams(dp(490), dp(325), Gravity.CENTER);
         addView(card, cardLp);
     }
 
     public void show(boolean inGame) {
         this.inGameMode = inGame;
+        syncFromSavedConfig(false);
+        btnFlushRam.setVisibility(inGameMode ? View.VISIBLE : View.GONE);
+        btnApplyReload.setVisibility(inGameMode ? View.VISIBLE : View.GONE);
+        setVisibility(View.VISIBLE);
+    }
+
+    private void syncFromSavedConfig(boolean reload) {
         LaunchConfig cfg = LaunchConfig.load(getContext());
+        ultraOpt = cfg.ultraOptimize;
+        ultraLevel = cfg.ultraLevel;
+        skipHome = cfg.skipPs5Home;
         statsEnabled = cfg.statsEnabled;
         statsFps = cfg.statsShowFps;
         statsCpuGpu = cfg.statsShowCpuGpu;
@@ -223,16 +298,35 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         renderDistance = cfg.renderDistance;
         lowEnd = cfg.lowEndMode;
 
+        swUltra.setChecked(ultraOpt, false);
+        swSkipHome.setChecked(skipHome, false);
         swStatsAll.setChecked(statsEnabled, false);
         swStatsFps.setChecked(statsFps, false);
         swStatsCpuGpu.setChecked(statsCpuGpu, false);
         swStatsRam.setChecked(statsRam, false);
         swLowEnd.setChecked(lowEnd, false);
 
+        refreshUltraUi(cfg);
         refreshPresetChips();
         refreshRdUi();
-        btnApplyReload.setVisibility(inGameMode ? View.VISIBLE : View.GONE);
-        setVisibility(View.VISIBLE);
+        if (callback != null) callback.onGraphicsSettingsChanged(reload);
+    }
+
+    private void refreshUltraUi(LaunchConfig cfg) {
+        boolean extreme = ultraOpt && ultraLevel == LaunchConfig.ULTRA_EXTREME;
+        styleTierChip(chipUltra360, ultraOpt && !extreme, 0xFF059669, 0xFF34D399);
+        styleTierChip(chipExtreme270, extreme, 0xFFD97706, 0xFFFBBF24);
+        tvUltraSavings.setText(cfg.getUltraSavingsSummary());
+        tvUltraSavings.setTextColor(ultraOpt ? (extreme ? 0xFFFDE68A : 0xFF6EE7B7) : 0xFF94A3B8);
+    }
+
+    private void styleTierChip(TextView tv, boolean active, int fill, int stroke) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(active ? (0xE0000000 | (fill & 0x00FFFFFF)) : 0x55122038);
+        bg.setCornerRadius(dp(10));
+        bg.setStroke(dp(1), active ? stroke : 0x4493C5FD);
+        tv.setBackground(bg);
+        tv.setTextColor(active ? Color.WHITE : 0xFFCBD5E1);
     }
 
     public void hide() {
@@ -257,7 +351,7 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         for (int i = 0; i < presetChips.length; i++) {
             boolean sel = (i == gfxPreset);
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(sel ? 0xE60070D1 : 0x66162244);
+            bg.setColor(sel ? (ultraOpt ? 0xE6059669 : 0xE60070D1) : 0x66162244);
             bg.setCornerRadius(dp(10));
             bg.setStroke(dp(1), sel ? Color.WHITE : 0x4493C5FD);
             presetChips[i].setBackground(bg);
@@ -275,13 +369,27 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         }
     }
 
-    private TextView makeSectionLabel(Context ctx, String text) {
+    private TextView makeSectionLabel(Context ctx, String text, int color) {
         TextView tv = new TextView(ctx);
         tv.setText(text);
-        tv.setTextColor(0xFF60A5FA);
+        tv.setTextColor(color);
         tv.setTextSize(10.5f);
         tv.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         tv.setPadding(0, dp(8), 0, dp(6));
+        return tv;
+    }
+
+    private TextView makeTierChip(Context ctx, String text, Runnable onClick) {
+        TextView tv = new TextView(ctx);
+        tv.setText(text);
+        tv.setTextSize(10.5f);
+        tv.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(8), dp(8), dp(8), dp(8));
+        tv.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            onClick.run();
+        });
         return tv;
     }
 
@@ -306,19 +414,19 @@ public final class Ps5SettingsOverlay extends FrameLayout {
         TextView t = new TextView(ctx);
         t.setText(title);
         t.setTextColor(Color.WHITE);
-        t.setTextSize(12.5f);
+        t.setTextSize(12f);
         t.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         textCol.addView(t);
 
         TextView s = new TextView(ctx);
         s.setText(sub);
         s.setTextColor(0xFF94A3B8);
-        s.setTextSize(10.5f);
+        s.setTextSize(10f);
         textCol.addView(s);
 
         row.addView(textCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         sw.setOnCheckedChangeListener(listener);
-        row.addView(sw, new LinearLayout.LayoutParams(dp(52), dp(28)));
+        row.addView(sw, new LinearLayout.LayoutParams(dp(50), dp(27)));
         row.setOnClickListener(v -> sw.toggle());
         return row;
     }

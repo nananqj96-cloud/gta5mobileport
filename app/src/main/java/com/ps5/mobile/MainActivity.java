@@ -25,30 +25,41 @@ import com.ps5.mobile.ui.PremiumToggleSwitch;
 import com.ps5.mobile.ui.ResourceLoadBarView;
 
 /**
- * PS5 Android Pre-Boot Launcher:
- * - Sleek PlayStation 5 midnight-cobalt aesthetic
- * - Small discreet Info (i) button at top-right transparently explaining the underlying GTA V WebGPU runtime
- * - Low-End Phone Mode toggle + Resource Load bar
- * - Graphics Quality override selector (Potato -> High, fixing playgta5.com's lower-graphics floor)
- * - Numeric Render Distance setting (Default = GTA 5 emu default, or 0..100 custom)
- * - Hero LAUNCH PS5 button
+ * PS5 Mobile v3.0 Ultra Optimize Pre-Boot Launcher:
+ * - Auto-detects Android total/free RAM and activates Ultra Optimize Mode on low-RAM/low-VRAM devices.
+ * - Hero Ultra Optimize Mode Card with 2-tier selector (ULTRA 360p / EXTREME 270p) and live VRAM savings readout.
+ * - Skip PS5 Home (Direct Boot) toggle + dedicated 1-tap Direct Boot CTA saving ~150MB RAM on startup.
+ * - Low-End Cap, Graphics Quality Override, and Render Distance controls.
  */
 public final class MainActivity extends Activity {
 
     private ImageView bgArt;
+    private View statusDot;
+    private View ultraCard;
+    private View ultraTierRow;
+    private View skipHomeCard;
     private View lowEndCard;
     private View btnLaunch;
+    private View btnDirectBoot;
     private TextView btnInfo;
     private TextView tvDeviceSpecs;
+    private TextView tvUltraBadge;
+    private TextView tvUltraDesc;
+    private TextView tvUltraSavings;
+    private TextView btnUltraBalanced;
+    private TextView btnUltraExtreme;
     private TextView tvModeBadge;
-    private TextView tvLowEndDesc;
     private TextView tvProfileMeta;
     private TextView tvGraphicsHint;
     private TextView tvRenderDistDesc;
     private TextView btnRenderDistNum;
     private TextView btnRenderDistReset;
+    private TextView tvLaunchTitle;
+    private TextView tvLaunchSub;
     private SeekBar seekRenderDist;
     private LinearLayout graphicsPresetRow;
+    private PremiumToggleSwitch toggleUltra;
+    private PremiumToggleSwitch toggleSkipHome;
     private PremiumToggleSwitch toggleLowEnd;
     private ResourceLoadBarView loadBar;
 
@@ -62,38 +73,80 @@ public final class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         bgArt = findViewById(R.id.bgArt);
+        statusDot = findViewById(R.id.statusDot);
+        ultraCard = findViewById(R.id.ultraCard);
+        ultraTierRow = findViewById(R.id.ultraTierRow);
+        skipHomeCard = findViewById(R.id.skipHomeCard);
         lowEndCard = findViewById(R.id.lowEndCard);
         btnLaunch = findViewById(R.id.btnLaunch);
+        btnDirectBoot = findViewById(R.id.btnDirectBoot);
         btnInfo = findViewById(R.id.btnInfo);
         tvDeviceSpecs = findViewById(R.id.tvDeviceSpecs);
+        tvUltraBadge = findViewById(R.id.tvUltraBadge);
+        tvUltraDesc = findViewById(R.id.tvUltraDesc);
+        tvUltraSavings = findViewById(R.id.tvUltraSavings);
+        btnUltraBalanced = findViewById(R.id.btnUltraBalanced);
+        btnUltraExtreme = findViewById(R.id.btnUltraExtreme);
         tvModeBadge = findViewById(R.id.tvModeBadge);
-        tvLowEndDesc = findViewById(R.id.tvLowEndDesc);
         tvProfileMeta = findViewById(R.id.tvProfileMeta);
         tvGraphicsHint = findViewById(R.id.tvGraphicsHint);
         tvRenderDistDesc = findViewById(R.id.tvRenderDistDesc);
         btnRenderDistNum = findViewById(R.id.btnRenderDistNum);
         btnRenderDistReset = findViewById(R.id.btnRenderDistReset);
+        tvLaunchTitle = findViewById(R.id.tvLaunchTitle);
+        tvLaunchSub = findViewById(R.id.tvLaunchSub);
         seekRenderDist = findViewById(R.id.seekRenderDist);
         graphicsPresetRow = findViewById(R.id.graphicsPresetRow);
+        toggleUltra = findViewById(R.id.toggleUltra);
+        toggleSkipHome = findViewById(R.id.toggleSkipHome);
         toggleLowEnd = findViewById(R.id.toggleLowEnd);
         loadBar = findViewById(R.id.loadBar);
 
         buildGraphicsPresetPills();
 
-        // Small discreet Info button (i) on the very start of the app
         btnInfo.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             showRuntimeInfoDialog();
         });
 
-        // Low-End Phone Mode Toggle
+        // 1. Ultra Optimize Mode Master Toggle + Tier Selector
+        toggleUltra.setOnCheckedChangeListener(checked -> {
+            int lvl = currentConfig != null ? currentConfig.ultraLevel : LaunchConfig.ULTRA_BALANCED;
+            LaunchConfig.saveUltraOptimize(this, checked, lvl);
+            refreshFromConfig(true);
+        });
+        ultraCard.setOnClickListener(v -> toggleUltra.toggle());
+
+        btnUltraBalanced.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            LaunchConfig.saveUltraOptimize(this, true, LaunchConfig.ULTRA_BALANCED);
+            refreshFromConfig(true);
+        });
+
+        btnUltraExtreme.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            LaunchConfig.saveUltraOptimize(this, true, LaunchConfig.ULTRA_EXTREME);
+            refreshFromConfig(true);
+        });
+
+        // 2. Skip PS5 Home (Direct Boot) Toggle
+        toggleSkipHome.setOnCheckedChangeListener(checked -> {
+            LaunchConfig.saveSkipPs5Home(this, checked);
+            refreshFromConfig(true);
+        });
+        skipHomeCard.setOnClickListener(v -> toggleSkipHome.toggle());
+
+        // 3. Low-End Mode Toggle
         toggleLowEnd.setOnCheckedChangeListener(checked -> {
+            if (!checked && currentConfig != null && currentConfig.ultraOptimize) {
+                LaunchConfig.saveUltraOptimize(this, false, currentConfig.ultraLevel);
+            }
             LaunchConfig.saveLowEndMode(this, checked);
             refreshFromConfig(true);
         });
         lowEndCard.setOnClickListener(v -> toggleLowEnd.toggle());
 
-        // Render Distance Slider + Numeric Input + Default Reset
+        // 4. Render Distance Slider + Numeric Input + Default Reset
         seekRenderDist.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -116,12 +169,25 @@ public final class MainActivity extends Activity {
             refreshFromConfig(true);
         });
 
-        // Hero LAUNCH PS5 Button
+        // 5. Primary Launch Button
         btnLaunch.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80).withEndAction(() -> {
                 v.animate().scaleX(1f).scaleY(1f).setDuration(100).start();
-                startActivity(new Intent(this, GameActivity.class));
+                Intent i = new Intent(this, GameActivity.class);
+                i.putExtra(GameActivity.EXTRA_DIRECT_LAUNCH, currentConfig != null && currentConfig.skipPs5Home);
+                startActivity(i);
+            }).start();
+        });
+
+        // 6. Instant 1-Tap Direct Boot GTA V (Always Skips PS5 Home for Lowest RAM)
+        btnDirectBoot.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80).withEndAction(() -> {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(100).start();
+                Intent i = new Intent(this, GameActivity.class);
+                i.putExtra(GameActivity.EXTRA_DIRECT_LAUNCH, true);
+                startActivity(i);
             }).start();
         });
 
@@ -147,7 +213,7 @@ public final class MainActivity extends Activity {
             final int idx = i;
             TextView tv = new TextView(this);
             tv.setText(LaunchConfig.PRESET_SHORT[i]);
-            tv.setTextSize(10.5f);
+            tv.setTextSize(10f);
             tv.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
             tv.setGravity(Gravity.CENTER);
             tv.setPadding(Math.round(4 * d), Math.round(7 * d), Math.round(4 * d), Math.round(7 * d));
@@ -156,6 +222,9 @@ public final class MainActivity extends Activity {
             tv.setLayoutParams(lp);
             tv.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                if (idx > LaunchConfig.PRESET_POTATO && currentConfig != null && currentConfig.ultraOptimize) {
+                    LaunchConfig.saveUltraOptimize(this, false, currentConfig.ultraLevel);
+                }
                 LaunchConfig.saveGraphicsPreset(this, idx);
                 refreshFromConfig(true);
             });
@@ -166,45 +235,73 @@ public final class MainActivity extends Activity {
 
     private void refreshFromConfig(boolean animate) {
         currentConfig = LaunchConfig.load(this);
+        float d = getResources().getDisplayMetrics().density;
+
         tvDeviceSpecs.setText(currentConfig.getDeviceSpecSummary());
+        statusDot.setBackgroundColor(currentConfig.isLowRamHardware() ? 0xFFF59E0B : 0xFF34D399);
+
+        // Ultra Optimize Hero Card state
+        boolean ultraOn = currentConfig.ultraOptimize;
+        boolean extreme = ultraOn && currentConfig.ultraLevel == LaunchConfig.ULTRA_EXTREME;
+        toggleUltra.setChecked(ultraOn, animate);
+        ultraCard.setBackgroundResource(ultraOn ? R.drawable.bg_ultra_card_active : R.drawable.bg_ultra_card);
+        ultraTierRow.setAlpha(ultraOn ? 1.0f : 0.55f);
+
+        if (extreme) {
+            tvUltraBadge.setText("EXTREME 270p");
+            tvUltraBadge.setBackgroundResource(R.drawable.bg_badge_ultra);
+            tvUltraBadge.setTextColor(0xFFFBBF24);
+            tvUltraDesc.setText(R.string.ultra_desc_extreme);
+        } else if (ultraOn) {
+            tvUltraBadge.setText("ULTRA 360p");
+            tvUltraBadge.setBackgroundResource(R.drawable.bg_badge_ultra);
+            tvUltraBadge.setTextColor(0xFF34D399);
+            tvUltraDesc.setText(R.string.ultra_desc_balanced);
+        } else {
+            tvUltraBadge.setText("OFF");
+            tvUltraBadge.setBackgroundResource(R.drawable.bg_badge_std);
+            tvUltraBadge.setTextColor(0xFF94A3B8);
+            tvUltraDesc.setText(R.string.ultra_desc_off);
+        }
+
+        styleTierPill(btnUltraBalanced, ultraOn && !extreme, 0xFF059669, 0xFF34D399);
+        styleTierPill(btnUltraExtreme, extreme, 0xFFD97706, 0xFFFBBF24);
+        tvUltraSavings.setText(currentConfig.getUltraSavingsSummary());
+        tvUltraSavings.setTextColor(ultraOn ? (extreme ? 0xFFFDE68A : 0xFF6EE7B7) : 0xFF94A3B8);
+
+        // Skip Home + Low-End Pills
+        toggleSkipHome.setChecked(currentConfig.skipPs5Home, animate);
+        skipHomeCard.setBackgroundResource(currentConfig.skipPs5Home
+                ? R.drawable.bg_toggle_card_active : R.drawable.bg_toggle_card);
 
         toggleLowEnd.setChecked(currentConfig.lowEndMode, animate);
         lowEndCard.setBackgroundResource(currentConfig.lowEndMode
-                ? R.drawable.bg_toggle_card_active
-                : R.drawable.bg_toggle_card);
+                ? R.drawable.bg_toggle_card_active : R.drawable.bg_toggle_card);
+        tvModeBadge.setText(currentConfig.lowEndMode ? "30 FPS · 2 Cores" : "60 FPS · Full");
+        tvModeBadge.setTextColor(currentConfig.lowEndMode ? 0xFF34D399 : 0xFF38BDF8);
 
-        if (currentConfig.lowEndMode) {
-            tvModeBadge.setText("LOW-END ON");
-            tvModeBadge.setBackgroundResource(R.drawable.bg_badge_low);
-            tvModeBadge.setTextColor(0xFF34D399);
-            tvLowEndDesc.setText(R.string.low_end_desc_on);
-        } else {
-            tvModeBadge.setText("STANDARD");
-            tvModeBadge.setBackgroundResource(R.drawable.bg_badge_std);
-            tvModeBadge.setTextColor(0xFF38BDF8);
-            tvLowEndDesc.setText(R.string.low_end_desc_off);
-        }
-
+        // Resource Load Meter
         tvProfileMeta.setText(currentConfig.getProfileSummary());
-        loadBar.setLoad(currentConfig.getEstimatedLoadFraction(), currentConfig.lowEndMode, animate);
+        loadBar.setLoad(currentConfig.getEstimatedLoadFraction(), currentConfig.lowEndMode || ultraOn, animate);
 
         // Graphics tier highlights
-        float d = getResources().getDisplayMetrics().density;
         for (int i = 0; i < presetButtons.length; i++) {
             boolean sel = (i == currentConfig.graphicsPreset);
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(sel ? 0xE60070D1 : 0x55122040);
+            bg.setColor(sel ? (ultraOn ? 0xE6059669 : 0xE60070D1) : 0x55122040);
             bg.setCornerRadius(10 * d);
             bg.setStroke(Math.round(1 * d), sel ? Color.WHITE : 0x4493C5FD);
             presetButtons[i].setBackground(bg);
             presetButtons[i].setTextColor(sel ? Color.WHITE : 0xFFB8C7E0);
         }
-        tvGraphicsHint.setText(LaunchConfig.PRESET_LABELS[currentConfig.graphicsPreset]);
+        tvGraphicsHint.setText(ultraOn
+                ? (extreme ? "POTATO · EXTREME 270p" : "POTATO · ULTRA 360p")
+                : LaunchConfig.PRESET_LABELS[currentConfig.graphicsPreset]);
 
         // Render Distance display
         if (currentConfig.renderDistance < 0) {
             btnRenderDistNum.setText("DEFAULT");
-            tvRenderDistDesc.setText("Default (GTA 5 Emu Default) · Lower = less loads nearby");
+            tvRenderDistDesc.setText("Default (GTA 5 Engine Default) · Lower = less loads nearby");
             seekRenderDist.setProgress(50);
             btnRenderDistReset.setAlpha(0.45f);
         } else {
@@ -219,13 +316,37 @@ public final class MainActivity extends Activity {
             btnRenderDistReset.setAlpha(1.0f);
         }
 
-        if (currentConfig.lowEndMode) {
+        // Primary CTA styling adapts to Direct Boot & Ultra Mode
+        if (currentConfig.skipPs5Home) {
+            tvLaunchTitle.setText(ultraOn ? "⚡ LAUNCH GTA V (" + currentConfig.getUltraBadgeLabel() + ")" : "LAUNCH GTA V DIRECT");
+            tvLaunchSub.setText("Skips PS5 Home WebView · Maximum free RAM for WebGPU");
+            btnLaunch.setBackgroundResource(ultraOn ? R.drawable.bg_launch_ultra_btn : R.drawable.bg_launch_btn);
+        } else {
+            tvLaunchTitle.setText(R.string.launch_button);
+            tvLaunchSub.setText(ultraOn
+                    ? ("PS5 Home UI · " + currentConfig.getUltraBadgeLabel() + " Armed")
+                    : getString(R.string.launch_sub));
+            btnLaunch.setBackgroundResource(R.drawable.bg_launch_btn);
+        }
+
+        // Disable background wallpaper animation on Low-End / Ultra phones to save GPU RAM
+        if (currentConfig.lowEndMode || ultraOn) {
             stopBgAnimation();
             bgArt.setScaleX(1.0f);
             bgArt.setScaleY(1.0f);
         } else {
             startBgAnimation();
         }
+    }
+
+    private void styleTierPill(TextView tv, boolean active, int fill, int stroke) {
+        float d = getResources().getDisplayMetrics().density;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(active ? (0xD9000000 | (fill & 0x00FFFFFF)) : 0x550C1A24);
+        bg.setCornerRadius(10 * d);
+        bg.setStroke(Math.round(1.2f * d), active ? stroke : 0x4464748B);
+        tv.setBackground(bg);
+        tv.setTextColor(active ? Color.WHITE : 0xFF94A3B8);
     }
 
     private void showRenderDistanceInputDialog() {
@@ -267,31 +388,21 @@ public final class MainActivity extends Activity {
 
     private void showRuntimeInfoDialog() {
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("System Information")
-                .setMessage(
-                        "PS5 Mobile Shell v2.2\n\n"
-                                + "Under the hood, this app is NOT a native PS5 hypervisor — it wraps a PlayStation 5 Home UI shell around the live playgta5.com Grand Theft Auto V WebGPU + WebAssembly runtime.\n\n"
-                                + "• 100% In-App Landscape Engine: Runs natively inside our fullscreen horizontal WebView using Chromium WebView's Cross-Origin Isolated Allowlist + Document-Isolation-Policy injection + dedicated high-priority renderer.\n"
-                                + "• PS5 Home UI: Controller-only navigation (use the on-screen DualSense D-Pad & ✕ / ○ buttons; direct screen tapping is disabled on PS5 Home).\n"
-                                + "• Android 86% Loading Fix: Injects MIT BC1–BC7 software texture decoding for Android GPUs (Adreno/Mali/PowerVR) that lack desktop WebGPU texture-compression-bc, clamps mobile shader compile concurrency, lowers the world-ready draw gate for low-end indoor scenes, and tunes mobile streaming lanes.\n"
-                                + "• Lower Graphics Fix: Passes clean verified RAGE engine flags (-shadowQuality=-1, -textureQuality=0, -lodScale, ?low=1, ?scale) below GTA V's pause-menu floor.\n"
-                                + "• Render Distance: Scales -lodScale, -pedLodBias, -vehicleLodBias, and -cityDensity.\n"
-                                + "• Hardware Stats: Live FPS, CPU/GPU usage & RAM — togglable from PS5 Settings.\n"
-                                + "• Floating [D] Button: Opens the GTA V Developer Trainer (vehicles, guns, fly, cheats & graphics)."
-                )
-                .setPositiveButton("Got It", null)
+                .setTitle(R.string.info_dialog_title)
+                .setMessage(R.string.info_dialog_message)
+                .setPositiveButton("OK", null)
                 .show();
     }
 
     private void startBgAnimation() {
         if (bgScaleX != null && bgScaleX.isRunning()) return;
-        bgScaleX = ObjectAnimator.ofFloat(bgArt, "scaleX", 1.0f, 1.06f);
+        bgScaleX = ObjectAnimator.ofFloat(bgArt, View.SCALE_X, 1.0f, 1.07f);
         bgScaleX.setDuration(14000);
         bgScaleX.setRepeatCount(ValueAnimator.INFINITE);
         bgScaleX.setRepeatMode(ValueAnimator.REVERSE);
         bgScaleX.setInterpolator(new LinearInterpolator());
 
-        bgScaleY = ObjectAnimator.ofFloat(bgArt, "scaleY", 1.0f, 1.06f);
+        bgScaleY = ObjectAnimator.ofFloat(bgArt, View.SCALE_Y, 1.0f, 1.07f);
         bgScaleY.setDuration(14000);
         bgScaleY.setRepeatCount(ValueAnimator.INFINITE);
         bgScaleY.setRepeatMode(ValueAnimator.REVERSE);
@@ -302,7 +413,7 @@ public final class MainActivity extends Activity {
     }
 
     private void stopBgAnimation() {
-        if (bgScaleX != null) bgScaleX.cancel();
-        if (bgScaleY != null) bgScaleY.cancel();
+        if (bgScaleX != null) { bgScaleX.cancel(); bgScaleX = null; }
+        if (bgScaleY != null) { bgScaleY.cancel(); bgScaleY = null; }
     }
 }

@@ -31,8 +31,8 @@ aapt2 link \
     --java "$WORK_DIR/gen" \
     --min-sdk-version 26 \
     --target-sdk-version 34 \
-    --version-code 5 \
-    --version-name "2.2.1" \
+    --version-code 6 \
+    --version-name "3.0.0" \
     -R "$WORK_DIR/res_compiled/resources.zip" \
     --auto-add-overlay
 

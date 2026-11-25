@@ -19,6 +19,7 @@ public final class StatsHudView extends LinearLayout {
 
     private final TextView tvFps;
     private final TextView tvCpuGpu;
+    private final TextView tvVram;
     private final TextView tvRam;
 
     private boolean masterEnabled = true;
@@ -43,10 +44,13 @@ public final class StatsHudView extends LinearLayout {
 
         tvFps = makeMetric(context, 0xFF34D399, "FPS --");
         tvCpuGpu = makeMetric(context, 0xFF60A5FA, "CPU --%");
+        tvVram = makeMetric(context, 0xFF2DD4BF, "");
+        tvVram.setVisibility(View.GONE);
         tvRam = makeMetric(context, 0xFFFBBF24, "RAM --");
 
         addView(tvFps);
         addView(tvCpuGpu);
+        addView(tvVram);
         addView(tvRam);
     }
 
@@ -70,6 +74,7 @@ public final class StatsHudView extends LinearLayout {
         setVisibility(any ? View.VISIBLE : View.GONE);
         tvFps.setVisibility(fps ? View.VISIBLE : View.GONE);
         tvCpuGpu.setVisibility(cpuGpu ? View.VISIBLE : View.GONE);
+        if (!ram && !cpuGpu) tvVram.setVisibility(View.GONE);
         tvRam.setVisibility(ram ? View.VISIBLE : View.GONE);
     }
 
@@ -91,6 +96,20 @@ public final class StatsHudView extends LinearLayout {
                 sb.append(" · GPU ").append(s.gpuPct).append('%');
             }
             tvCpuGpu.setText(sb.toString());
+        }
+
+        if ((showRam || showCpuGpu) && s.vramTexMb >= 0) {
+            int totalVram = s.vramTexMb + s.vramBufMb;
+            tvVram.setVisibility(View.VISIBLE);
+            if (s.vramSavedMb > 0) {
+                tvVram.setText(String.format(Locale.US, "VRAM %dM (-%dM)", totalVram, s.vramSavedMb));
+                tvVram.setTextColor(0xFF34D399);
+            } else {
+                tvVram.setText(String.format(Locale.US, "VRAM %dM", totalVram));
+                tvVram.setTextColor(totalVram > 420 ? 0xFFFB7185 : 0xFF2DD4BF);
+            }
+        } else {
+            tvVram.setVisibility(View.GONE);
         }
 
         if (showRam) {

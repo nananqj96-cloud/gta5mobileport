@@ -25,8 +25,9 @@ public final class MobileControlsOverlay extends FrameLayout {
     public interface HostCallback {
         void onOpenSettings();
         void onReturnToPs5Home();
-        void onReloadGame(boolean forcePotatoLowEnd);
+        void onReloadGame(boolean forceUltraExtreme);
         void onClearCacheAndReload();
+        void onTriggerMemoryTrim();
         void onUpdateWebView();
     }
 
@@ -140,6 +141,9 @@ public final class MobileControlsOverlay extends FrameLayout {
             manualPadOverride = !manualPadOverride;
             updateGameplayVisibility();
         });
+        addBarChip(context, topBar, "⚡", 0xFF059669, () -> {
+            if (hostCallback != null) hostCallback.onTriggerMemoryTrim();
+        });
         addBarChip(context, topBar, "⚙", COBALT, () -> {
             if (hostCallback != null) hostCallback.onOpenSettings();
         });
@@ -196,7 +200,7 @@ public final class MobileControlsOverlay extends FrameLayout {
             if (hostCallback != null) hostCallback.onUpdateWebView();
         });
         btnUpdateWebView.setVisibility(View.GONE);
-        addTitleChip(context, errActions, "POTATO MODE", EMERALD, () -> {
+        addTitleChip(context, errActions, "⚡ ULTRA EXTREME", EMERALD, () -> {
             hideError();
             if (hostCallback != null) hostCallback.onReloadGame(true);
         });

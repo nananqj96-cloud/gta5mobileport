@@ -5,6 +5,26 @@
 
     const params = new URLSearchParams(window.location.search);
     const isLowEnd = params.get('low') === '1';
+    const ultraLevel = parseInt(params.get('ultra') || '0', 10) || 0;
+    const isUltra = ultraLevel > 0;
+
+    // 0a. Ultra Optimize Mode low-RAM/low-VRAM browser caps (DOCUMENT_START, before game JS boots)
+    if (isUltra || isLowEnd) {
+        try {
+            Object.defineProperty(navigator, 'deviceMemory', {
+                configurable: true,
+                get: function () { return ultraLevel >= 2 ? 1 : 2; }
+            });
+        } catch (e) {}
+    }
+    if (isUltra) {
+        try {
+            Object.defineProperty(window, 'devicePixelRatio', {
+                configurable: true,
+                get: function () { return 1; }
+            });
+        } catch (e) {}
+    }
 
     // 0. Non-breaking SharedArrayBuffer probe (runs at DOCUMENT_START before page JS checks crossOriginIsolated)
     // Only exposes SharedArrayBuffer if WebView truly allows transferring shared Wasm memory to Workers.
@@ -32,12 +52,18 @@
             if (!host) return;
             const style = document.createElement('style');
             style.id = 'gta-mobile-style';
-            style.textContent = [
+            const cssRules = [
                 'html, body, #canvas { touch-action: none !important; user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; overscroll-behavior: none !important; }',
                 '#fps { display: none !important; }',
                 '#hud { top: 44px !important; font-size: 11px !important; opacity: 0.90 !important; }',
                 '#ls-log { display: block !important; margin-bottom: 54px !important; max-width: 82vw !important; opacity: 0.92 !important; }'
-            ].join('\n');
+            ];
+            if (isUltra) {
+                cssRules.push(
+                    '*, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }'
+                );
+            }
+            style.textContent = cssRules.join('\n');
             host.appendChild(style);
         } catch (e) {}
     }
@@ -273,13 +299,31 @@
                             if (typeof cfg.reflectionQuality === 'number') replaceVal('ReflectionQuality', cfg.reflectionQuality);
                             if (typeof cfg.waterQuality === 'number') replaceVal('WaterQuality', cfg.waterQuality);
                             if (typeof cfg.tessellation === 'number') replaceVal('Tessellation', cfg.tessellation);
+                            if (typeof cfg.particleQuality === 'number') replaceVal('ParticleQuality', cfg.particleQuality);
+                            if (typeof cfg.msaa === 'number') {
+                                replaceVal('MSAA', cfg.msaa);
+                                replaceVal('ReflectionMSAA', cfg.msaa);
+                            }
+                            if (typeof cfg.fxaa === 'number') replaceVal('FXAA', cfg.fxaa);
+                            if (typeof cfg.txaa === 'number') replaceVal('TXAA', cfg.txaa);
+                            if (typeof cfg.ssao === 'number') replaceVal('SSAO', cfg.ssao);
+                            if (typeof cfg.aniso === 'number') replaceVal('AnisotropicFiltering', cfg.aniso);
+                            if (typeof cfg.softShadows === 'number') replaceVal('Shadow_SoftShadows', cfg.softShadows);
+                            if (typeof cfg.particleShadows === 'boolean') replaceVal('Shadow_ParticleShadows', cfg.particleShadows ? 'true' : 'false');
+                            if (typeof cfg.popDensity === 'number') replaceVal('PopulationDensity', cfg.popDensity.toFixed(6));
+                            if (typeof cfg.popVariety === 'number') {
+                                const pv = cfg.popVariety.toFixed(6);
+                                replaceVal('PopulationVariety', pv);
+                                replaceVal('PedVarietyMultiplier', pv);
+                                replaceVal('VehicleVarietyMultiplier', pv);
+                            }
                             if (typeof cfg.lodScale === 'number' && cfg.lodScale >= 0) {
                                 const f = cfg.lodScale.toFixed(6);
                                 replaceVal('LodScale', f);
                                 replaceVal('PedLodBias', f);
                                 replaceVal('VehicleLodBias', f);
                                 replaceVal('DistanceScaling', f);
-                                replaceVal('Shadow_Distance', Math.max(0.25, cfg.lodScale).toFixed(6));
+                                replaceVal('Shadow_Distance', Math.max(0.20, cfg.lodScale).toFixed(6));
                             }
                             const enc = new TextEncoder().encode(xml);
                             store.put({ data: enc, mtime: Date.now() }, '/userdata/settings.xml');
@@ -444,6 +488,15 @@
             Array.from(heldButtons).forEach(function (btn) { window.__gtaMobile.mouseButton(btn, false); });
         },
 
+        triggerMemoryTrim: function () {
+            try {
+                const bc = new BroadcastChannel('ps5-ultra-ctrl');
+                bc.postMessage({ cmd: 'trim', ts: Date.now() });
+                setTimeout(function () { try { bc.close(); } catch (e) {} }, 120);
+            } catch (e) {}
+            notifyAndroid('onMemoryTrimmed');
+        },
+
         clearStorageCache: function () {
             // Purges OPFS streamed data cache (gamedata / gamedata-b) without touching saves (gta5-userdata)
             (async function () {
@@ -478,8 +531,20 @@
     try {
         const fpsBc = new BroadcastChannel('game-fps');
         fpsBc.onmessage = function (ev) {
-            if (ev.data && typeof ev.data.fps === 'number') {
-                notifyAndroid('onFps', ev.data.fps);
+            const d = ev.data;
+            if (!d) return;
+            if (typeof d.fps === 'number') {
+                notifyAndroid('onFps', d.fps);
+            }
+            if (typeof d.vramTexMb === 'number') {
+                notifyAndroid(
+                    'onGpuTelemetry',
+                    d.vramTexMb | 0,
+                    (d.vramBufMb || 0) | 0,
+                    (d.vramSavedMb || 0) | 0,
+                    (d.texCount || 0) | 0,
+                    !!d.ultraOn
+                );
             }
         };
     } catch (e) {}
