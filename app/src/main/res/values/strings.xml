@@ -4,9 +4,9 @@
     <string name="launcher_brand">PS5</string>
     <string name="launcher_subtitle">MOBILE REMAKE v3.0 · ULTRA WEBGPU</string>
     <string name="ultra_title">⚡ Ultra Optimize Mode</string>
-    <string name="ultra_desc_off">Enable for 2–6 GB RAM phones: cuts VRAM up to 88% via BC texture mip-drop, 1–2MB ring &amp; 360p/270p GBuffer</string>
-    <string name="ultra_desc_balanced">4GB+ Ultra Profile: 360p GBuffer · BC mip-drop ≤256px · 2MB ring · 4MB arena · 32MB IO cache · ~75% VRAM saved</string>
-    <string name="ultra_desc_extreme">2–3GB Survival Profile: 270p GBuffer · BC mip-drop ≤128px · 1MB ring · 16MB IO · no hints · nearest mip · ~88% VRAM saved</string>
+    <string name="ultra_desc_off" formatted="false">Enable for 2–6 GB RAM phones: cuts VRAM up to 88% via BC texture mip-drop, 1–2MB ring &amp; 360p/270p GBuffer</string>
+    <string name="ultra_desc_balanced" formatted="false">4GB+ Ultra Profile: 360p GBuffer · BC mip-drop ≤256px · 2MB ring · 4MB arena · 32MB IO cache · ~75% VRAM saved</string>
+    <string name="ultra_desc_extreme" formatted="false">2–3GB Survival Profile: 270p GBuffer · BC mip-drop ≤128px · 1MB ring · 16MB IO · no hints · nearest mip · ~88% VRAM saved</string>
     <string name="low_end_title">Low-End Phone Mode</string>
     <string name="low_end_desc_off">Balanced performance · 60 FPS target · full WebGPU threads</string>
     <string name="low_end_desc_on">Limits RAM &amp; GPU load · 30 FPS · 2 cores · shadows off</string>
@@ -15,5 +15,5 @@
     <string name="launch_direct_button">⚡ DIRECT BOOT GTA V (LOWEST RAM)</string>
     <string name="launch_direct_sub">Skips PS5 Home WebView · Saves ~150MB RAM on boot</string>
     <string name="info_dialog_title">PS5 Mobile v3.0 · Ultra Optimize Engine</string>
-    <string name="info_dialog_message">PS5 Mobile v3.0 is a native Android WebGPU host &amp; controller shell for playgta5.com (Emscripten WASM + DirectX 11 -> WebGPU).\n\n⚡ ULTRA OPTIMIZE MODE forces GTA V onto low-VRAM and low-RAM Android phones via:\n• BC1–BC7 Texture Mip-Drop (caps decoded RGBA textures to ≤256px or ≤128px, cutting texture VRAM by 75%–88%)\n• 360p / 270p GBuffer scaling (cuts ~12 deferred render targets by 4x–7x)\n• Uniform ring (8MB -> 1–2MB), buffer arena (16MB -> 4MB), BindGroup cache (24K -> 1.5K–3K) &amp; proxy-texture leak fix\n• IO worker RAM cap (192–768MB -> 16–32MB) + live Android onTrimMemory cache flush\n• Direct Boot skips PS5 Home WebView to preserve ~150MB extra RAM</string>
+    <string name="info_dialog_message" formatted="false">PS5 Mobile v3.0 is a native Android WebGPU host &amp; controller shell for playgta5.com (Emscripten WASM + DirectX 11 -&gt; WebGPU).\n\n⚡ ULTRA OPTIMIZE MODE forces GTA V onto low-VRAM and low-RAM Android phones via:\n• BC1–BC7 Texture Mip-Drop (caps decoded RGBA textures to ≤256px or ≤128px, cutting texture VRAM by 75%–88%)\n• 360p / 270p GBuffer scaling (cuts ~12 deferred render targets by 4x–7x)\n• Uniform ring (8MB -&gt; 1–2MB), buffer arena (16MB -&gt; 4MB), BindGroup cache (24K -&gt; 1.5K–3K) &amp; proxy-texture leak fix\n• IO worker RAM cap (192–768MB -&gt; 16–32MB) + live Android onTrimMemory cache flush\n• Direct Boot skips PS5 Home WebView to preserve ~150MB extra RAM</string>
 </resources>
