@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTA VI — Current Development Updates | ViceBox X</title>
+<style>
+  :root {
+    --bg: #080a12;
+    --card: rgba(16, 20, 34, 0.86);
+    --pink: #ff3394;
+    --orange: #ff8c3a;
+    --cyan: #0ae0ff;
+    --emerald: #19db7a;
+    --text: #f4f7ff;
+    --muted: #9aa7c2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    background: radial-gradient(circle at 18% 20%, rgba(255,51,148,0.18), transparent 45%),
+                radial-gradient(circle at 82% 78%, rgba(10,224,255,0.15), transparent 48%),
+                linear-gradient(135deg, #070911 0%, #101324 55%, #090c17 100%);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    overflow-x: hidden;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 880px;
+    background: var(--card);
+    border: 1px solid rgba(255, 51, 148, 0.34);
+    border-radius: 22px;
+    overflow: hidden;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 60px rgba(255, 51, 148, 0.14);
+    backdrop-filter: blur(16px);
+  }
+  .hero {
+    position: relative;
+    height: 280px;
+    background: url('/vbx/img/gta6_hero.jpg') center/cover no-repeat;
+    display: flex;
+    align-items: flex-end;
+    padding: 28px 34px;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(8,10,18,0.18) 0%, rgba(8,10,18,0.72) 65%, rgba(16,20,34,1) 100%);
+  }
+  .hero-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 24px;
+  }
+  .hero-logo {
+    height: 112px;
+    object-fit: contain;
+    filter: drop-shadow(0 8px 24px rgba(0,0,0,0.85));
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(255, 51, 148, 0.18);
+    border: 1px solid rgba(255, 51, 148, 0.5);
+    color: #ff98c8;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--pink);
+    box-shadow: 0 0 12px var(--pink);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.8); } }
+  .body { padding: 28px 34px 34px; }
+  .status-quote {
+    background: linear-gradient(135deg, rgba(255,51,148,0.14), rgba(10,224,255,0.09));
+    border: 1px solid rgba(255,255,255,0.16);
+    border-left: 4px solid var(--pink);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 24px;
+  }
+  .status-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 10px;
+  }
+  .status-text {
+    font-size: 20px;
+    line-height: 1.55;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .stat {
+    background: rgba(8, 11, 20, 0.72);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 15px 16px;
+  }
+  .stat .k {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .stat .v {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .stat .v.pink { color: var(--pink); }
+  .stat .v.emerald { color: var(--emerald); }
+  .stat .v.cyan { color: var(--cyan); }
+  .notes {
+    background: rgba(8, 11, 20, 0.65);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 24px;
+  }
+  .notes h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--orange);
+    margin-bottom: 10px;
+  }
+  .notes ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .notes li::before {
+    content: "▸ ";
+    color: var(--cyan);
+    font-weight: 700;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .btn {
+    border: none;
+    border-radius: 10px;
+    padding: 12px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform 0.16s, box-shadow 0.16s, background 0.16s;
+  }
+  .btn-primary {
+    background: linear-gradient(90deg, var(--emerald), #0ec2a2);
+    color: #05130c;
+    box-shadow: 0 8px 24px rgba(25, 219, 122, 0.28);
+  }
+  .btn-primary:hover { transform: translateY(-2px); }
+  .btn-ghost {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.16);
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.14); }
+  .hw-bar {
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="hero-content">
+      <img class="hero-logo" src="/vbx/img/gta6_logo.png" alt="Grand Theft Auto VI">
+      <div class="pill"><span class="dot"></span> LIVE DEV BUILD STATUS</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="status-quote">
+      <div class="status-label">CURRENT GTA 6 EMULATOR UPDATE</div>
+      <div class="status-text">game runs on 5 fps per 20 seconds. the game is semi-playable if your a nerd. the game fully works. only fix needed : fps</div>
+    </div>
+
+    <div class="grid">
+      <div class="stat">
+        <div class="k">Current Frame Rate</div>
+        <div class="v pink">5 FPS / 20s</div>
+      </div>
+      <div class="stat">
+        <div class="k">Core Emulation</div>
+        <div class="v emerald">100% Working</div>
+      </div>
+      <div class="stat">
+        <div class="k">Playability</div>
+        <div class="v cyan">Semi-Playable</div>
+      </div>
+      <div class="stat">
+        <div class="k">Only Fix Needed</div>
+        <div class="v pink">FPS Optimization</div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Engineering Progress Log — ViceBox X Hypervisor</h3>
+      <ul>
+        <li>Full RAGE9 world streaming, character logic, AI, audio, and Leonida shaders boot and run completely.</li>
+        <li>Both Xbox Series X native pipeline and Xbox-to-PS5 compatibility port are confirmed functional.</li>
+        <li>Remaining bottleneck is frame-pacing / shader recompilation throughput (currently 5 fps per 20 seconds).</li>
+        <li>GTA V Emulator is live and fully playable right now on both PS5 and Xbox dashboards while GTA VI FPS fixes land.</li>
+      </ul>
+    </div>
+
+    <div class="actions">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="btn btn-primary" href="/ps5/">Open PS5 Dashboard</a>
+        <a class="btn btn-ghost" href="/xbox/">Open Xbox Dashboard</a>
+        <button class="btn btn-ghost" onclick="window.close()">Close Window</button>
+      </div>
+      <div class="hw-bar" id="hwLine">Reading live PC hardware...</div>
+    </div>
+  </div>
+</div>
+<script>
+async function pollHw() {
+  try {
+    const r = await fetch('/vbx/api/telemetry');
+    const d = await r.json();
+    document.getElementById('hwLine').textContent =
+      `HOST CPU: ${d.cpuPct.toFixed(0)}% | GPU: ${d.gpuPct.toFixed(0)}% | RAM: ${d.ramUsedGb.toFixed(1)}/${d.ramTotalGb.toFixed(1)} GB`;
+  } catch (e) {}
+}
+pollHw();
+setInterval(pollHw, 1000);
+</script>
+</body>
+</html>

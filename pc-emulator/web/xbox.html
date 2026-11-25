@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xbox Dashboard (DashX360) — ViceBox X Emulator</title>
+<style>
+  /* ==================== AUTHENTIC ZivvoZ/dashx360 METRO + BLADES STYLES ==================== */
+  :root {
+    --metro-green: #028d02;
+    --metro-green-dark: #0d5f25;
+    --metro-text: #f7f7f7;
+    --metro-muted: #c9d1c9;
+    --metro-panel: rgba(22, 25, 26, 0.88);
+    --bg-grad: linear-gradient(180deg, #3c4143 0%, #666b6d 42%, #c7c9c8 100%);
+  }
+  body.theme-seriesx {
+    --metro-green: #107c10;
+    --metro-green-dark: #0a4f0a;
+    --bg-grad: radial-gradient(circle at 20% 15%, rgba(16, 185, 129, 0.16), transparent 52%),
+               linear-gradient(180deg, #0d1115 0%, #151b22 50%, #0b0e12 100%);
+  }
+  body.theme-emerald {
+    --metro-green: #0ea54a;
+    --metro-green-dark: #065f30;
+    --bg-grad: linear-gradient(180deg, #0b2416 0%, #123c24 48%, #091b12 100%);
+  }
+  body.theme-vice {
+    --metro-green: #ff2e88;
+    --metro-green-dark: #9d174d;
+    --bg-grad: linear-gradient(160deg, #1b0b2e 0%, #3b0f47 48%, #0f2538 100%);
+  }
+
+  * { box-sizing: border-box; }
+  *::-webkit-scrollbar { width: 0; height: 0; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--metro-text);
+    background: var(--bg-grad);
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ==================== XBOX BOOT SPLASH ==================== */
+  #xbox-boot {
+    position: fixed; inset: 0; z-index: 9000;
+    background: radial-gradient(circle at center, #0e2412 0%, #050806 65%, #000 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: opacity 0.75s ease, transform 0.75s ease;
+    cursor: pointer;
+  }
+  #xbox-boot.hidden { opacity: 0; pointer-events: none; transform: scale(1.06); }
+  .xbox-orb {
+    width: 138px; height: 138px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #e5ffe5 0%, #86efac 28%, #10b946 66%, #064e1e 100%);
+    box-shadow: 0 0 70px rgba(16, 214, 92, 0.75), inset 0 0 28px rgba(255,255,255,0.55);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    animation: orbPop 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes orbPop {
+    0% { transform: scale(0.35); opacity: 0; }
+    65% { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .xbox-orb::before {
+    content: ''; position: absolute; inset: -16px; border-radius: 50%;
+    border: 2px solid rgba(74, 222, 128, 0.55);
+    animation: orbWave 2s ease-out infinite;
+  }
+  @keyframes orbWave { 0% { transform: scale(0.92); opacity: 0.85; } 100% { transform: scale(1.7); opacity: 0; } }
+  .xbox-boot-title {
+    margin-top: 28px; font-size: 32px; font-weight: 300; letter-spacing: 6px;
+    color: #e2ffe9; text-shadow: 0 0 24px rgba(16,214,92,0.55);
+  }
+  .xbox-boot-sub {
+    margin-top: 8px; font-size: 13px; letter-spacing: 1.5px; color: rgba(255,255,255,0.55);
+  }
+
+  /* ==================== METRO DASHBOARD (Exact DashX360 MetroTheme.xaml) ==================== */
+  #metro-shell {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    padding: 22px 54px 18px;
+    position: relative;
+  }
+  #metro-shell.hidden { display: none; }
+
+  .metro-top {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .metro-brand {
+    display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600;
+    color: rgba(255,255,255,0.86); letter-spacing: 0.6px;
+    background: rgba(0,0,0,0.28); padding: 6px 14px; border-radius: 999px;
+  }
+  .metro-dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+
+  .metro-profile-box {
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    padding: 5px 12px; border-radius: 6px; background: rgba(0,0,0,0.24);
+    border: 1px solid rgba(255,255,255,0.16); transition: background 0.16s;
+  }
+  .metro-profile-box:hover { background: rgba(0,0,0,0.44); }
+  .metro-profile-meta { text-align: right; }
+  .metro-gamertag { font-size: 16px; font-weight: 400; color: #fff; display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+  .metro-gscore { font-size: 12px; color: #d4e4d4; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+  .gp-badge {
+    font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 3px;
+    background: #107c10; color: #fff; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .metro-avatar { width: 42px; height: 42px; border: 2px solid rgba(255,255,255,0.82); object-fit: cover; background: #0f172a; }
+
+  /* DashX360 Tab Strip (Segoe UI Light 27px lowercase) */
+  .metro-tabs {
+    display: flex; align-items: center; gap: 32px;
+    margin: 4px 0 22px; padding-bottom: 4px;
+    overflow-x: auto;
+  }
+  .metro-tab {
+    background: none; border: none; padding: 0;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 28px; font-weight: 300;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer; transition: color 0.16s, transform 0.16s;
+    position: relative;
+  }
+  .metro-tab:hover { color: rgba(255, 255, 255, 0.85); }
+  .metro-tab.active {
+    color: #ffffff;
+    font-weight: 400;
+    transform: scale(1.04);
+  }
+  .metro-tab.active::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: -4px;
+    height: 3px; background: var(--metro-green);
+  }
+
+  /* Main Metro Viewport */
+  .metro-content {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    animation: fadeSlide 0.22s ease;
+  }
+  @keyframes fadeSlide { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* DashX360 HOME Bento Tile Layout (matches metropreview.png!) */
+  .metro-home-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr 1fr 230px;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 10px;
+    height: 100%;
+    max-height: 510px;
+  }
+  .m-tile {
+    position: relative;
+    overflow: hidden;
+    background: var(--metro-green);
+    border: 2px solid rgba(255,255,255,0.22);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 14px 16px;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    background-size: cover;
+    background-position: center;
+  }
+  .m-tile:hover, .m-tile.focused {
+    transform: scale(1.018);
+    border-color: #ffffff;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    z-index: 3;
+  }
+  .m-tile.img-tile::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, transparent 35%, rgba(0,0,0,0.82) 100%);
+    pointer-events: none;
+  }
+  .m-tile-ico {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -62%);
+    font-size: 46px; opacity: 0.94;
+  }
+  .m-tile-title {
+    position: relative; z-index: 2; font-size: 16px; font-weight: 400;
+    color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.75);
+  }
+  .m-tile-sub {
+    position: relative; z-index: 2; font-size: 11.5px; color: rgba(255,255,255,0.78);
+    margin-top: 2px;
+  }
+  .m-tile.hero-span { grid-column: 2 / span 2; grid-row: 1 / span 2; }
+  .m-em-badge {
+    position: absolute; top: 10px; right: 10px; z-index: 3;
+    padding: 4px 9px; background: rgba(16, 185, 129, 0.94); color: #03150d;
+    font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
+  }
+
+  /* DashX360 MY GAMES Carousel (matches exact white-card box art strip!) */
+  .metro-games-hdr {
+    display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;
+  }
+  .metro-games-hdr h2 { margin: 0; font-size: 28px; font-weight: 300; }
+  .metro-games-strip {
+    display: flex; gap: 16px; overflow-x: auto; padding: 10px 6px 20px; align-items: flex-start;
+  }
+  .x-game-card {
+    width: 205px; flex-shrink: 0; background: #f3f4f6; color: #111827;
+    border: 3px solid transparent; cursor: pointer;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.34);
+    transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s;
+    position: relative;
+  }
+  .x-game-card:hover, .x-game-card.active {
+    transform: translateY(-6px) scale(1.045);
+    border-color: #ffffff;
+    box-shadow: 0 18px 38px rgba(0,0,0,0.52), 0 0 0 3px var(--metro-green);
+    z-index: 4;
+  }
+  .x-game-art {
+    width: 100%; height: 220px; object-fit: cover; display: block; background: #111;
+  }
+  .x-game-meta { padding: 11px 12px 13px; }
+  .x-game-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .x-game-sub { font-size: 11.5px; color: #4b5563; margin-top: 3px; }
+  .x-game-bar {
+    margin-top: 12px; display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 20px; background: var(--metro-panel); border: 1px solid rgba(255,255,255,0.14);
+  }
+
+  /* Metro Settings / Jailbreak Grid */
+  .x-settings-wrap {
+    display: flex; gap: 24px; height: 100%; min-height: 0;
+  }
+  .x-settings-nav {
+    width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  }
+  .x-set-btn {
+    padding: 15px 18px; background: rgba(16, 20, 22, 0.78);
+    border: 2px solid rgba(255,255,255,0.14); color: #fff; font-size: 16px; font-weight: 400;
+    text-align: left; cursor: pointer; display: flex; align-items: center; gap: 12px;
+    transition: background 0.14s, border-color 0.14s;
+  }
+  .x-set-btn:hover { background: rgba(2, 141, 2, 0.45); border-color: rgba(255,255,255,0.65); }
+  .x-set-btn.active { background: var(--metro-green); border-color: #fff; font-weight: 600; }
+  .x-set-btn.jb { border-color: rgba(250, 204, 21, 0.55); color: #fde047; }
+  .x-set-btn.jb.active { background: linear-gradient(90deg, #b45309, #eab308); color: #161103; }
+
+  .x-settings-pane {
+    flex: 1; background: var(--metro-panel); border: 1px solid rgba(255,255,255,0.16);
+    padding: 22px 26px; overflow-y: auto;
+  }
+  .x-settings-pane h2 { margin: 0 0 6px; font-size: 25px; font-weight: 300; }
+  .x-settings-pane .sub { font-size: 13.5px; color: var(--metro-muted); margin-bottom: 18px; }
+  .x-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 16px;
+    padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .x-row .lbl { font-size: 15px; font-weight: 500; }
+  .x-row .desc { font-size: 12px; color: var(--metro-muted); margin-top: 2px; }
+  .x-btn {
+    padding: 9px 18px; background: var(--metro-green); color: #fff;
+    border: 1.5px solid rgba(255,255,255,0.5); font-size: 13.5px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s, transform 0.12s;
+  }
+  .x-btn:hover { filter: brightness(1.14); transform: translateY(-1px); }
+  .x-btn.ps5 { background: linear-gradient(90deg, #00439c, #0070d1); border-color: #93c5fd; }
+  .x-btn.ghost { background: rgba(255,255,255,0.1); }
+  .x-input, .x-select {
+    padding: 8px 12px; background: rgba(0,0,0,0.48); border: 1px solid rgba(255,255,255,0.28);
+    color: #fff; font-size: 14px; min-width: 210px;
+  }
+
+  /* Bottom Xbox Controller Prompts (exact DashX360 style: green A, red B, blue X, yellow Y!) */
+  .xbox-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-top: 10px; font-size: 14px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.65);
+  }
+  .x-prompts { display: flex; gap: 20px; align-items: center; }
+  .x-pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 800;
+    margin-right: 6px; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  }
+  .x-a { background: #16a34a; }
+  .x-b { background: #dc2626; }
+  .x-x { background: #2563eb; }
+  .x-y { background: #eab308; color: #181403; }
+
+  /* ==================== CLASSIC XBOX 360 BLADES DASHBOARD (DashX360 v1.3.0) ==================== */
+  #blades-shell {
+    width: 100%; height: 100%; display: none; flex-direction: column;
+    background: linear-gradient(180deg, #b9c4cf 0%, #6d7b89 48%, #2d3741 100%);
+    padding: 18px 24px;
+  }
+  #blades-shell.active { display: flex; }
+  .blades-accordion {
+    flex: 1; display: flex; gap: 4px; min-height: 0; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+  }
+  .blade {
+    width: 56px; flex-shrink: 0; display: flex; cursor: pointer;
+    transition: flex 0.3s cubic-bezier(0.22, 1, 0.36, 1), width 0.3s ease;
+    position: relative; overflow: hidden;
+    border-left: 2px solid rgba(255,255,255,0.45);
+  }
+  .blade.open { flex: 1; width: auto; cursor: default; }
+  .blade-spine {
+    width: 56px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; color: #fff; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,0.55); cursor: pointer;
+  }
+  .blade-body {
+    flex: 1; padding: 26px 30px; overflow-y: auto; display: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(226,232,240,0.96));
+    color: #111827;
+  }
+  .blade.open .blade-body { display: block; }
+  .blade-mkt .blade-spine { background: linear-gradient(180deg, #9333ea, #581c87); }
+  .blade-live .blade-spine { background: linear-gradient(180deg, #f97316, #c2410c); }
+  .blade-games .blade-spine { background: linear-gradient(180deg, #22c55e, #15803d); }
+  .blade-media .blade-spine { background: linear-gradient(180deg, #3b82f6, #1d4ed8); }
+  .blade-sys .blade-spine { background: linear-gradient(180deg, #94a3b8, #475569); }
+  .blade-item-row {
+    display: flex; align-items: center; gap: 14px; padding: 11px 14px;
+    background: rgba(255,255,255,0.8); border: 2px solid transparent; border-radius: 6px;
+    margin-bottom: 8px; cursor: pointer; transition: border-color 0.14s, background 0.14s;
+  }
+  .blade-item-row:hover { border-color: #16a34a; background: #ecfdf5; }
+
+  /* ==================== XBOX GUIDE OVERLAY (DashX360 GuideWindow.xaml) ==================== */
+  #xbox-guide, #xbox-modal {
+    position: fixed; inset: 0; z-index: 6500;
+    background: rgba(8, 12, 14, 0.78); backdrop-filter: blur(10px);
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  #xbox-guide.open, #xbox-modal.open { display: flex; }
+  .guide-card {
+    width: 100%; max-width: 520px; background: linear-gradient(180deg, #2a3135 0%, #171c1f 100%);
+    border: 2px solid rgba(255,255,255,0.35); border-top: 5px solid #16a34a;
+    border-radius: 10px; padding: 24px 26px; box-shadow: 0 28px 80px rgba(0,0,0,0.75);
+  }
+  .guide-card h3 { margin: 0 0 12px; font-size: 22px; font-weight: 300; display: flex; align-items: center; gap: 10px; }
+  .guide-btn {
+    width: 100%; padding: 12px 16px; margin-bottom: 8px; text-align: left;
+    background: rgba(255,255,255,0.08); border: 1.5px solid rgba(255,255,255,0.14);
+    color: #fff; font-size: 15px; cursor: pointer; display: flex; justify-content: space-between;
+  }
+  .guide-btn:hover { background: var(--metro-green); border-color: #fff; }
+
+  #xbox-toast {
+    position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%) translateY(20px);
+    z-index: 8000; background: rgba(15, 22, 18, 0.95); border: 2px solid #22c55e;
+    color: #fff; padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    opacity: 0; pointer-events: none; transition: 0.22s ease;
+  }
+  #xbox-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .avatar-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .avatar-opt { width: 52px; height: 52px; border: 2.5px solid transparent; cursor: pointer; overflow: hidden; }
+  .avatar-opt.selected { border-color: #22c55e; box-shadow: 0 0 14px rgba(34,197,94,0.65); }
+</style>
+</head>
+<body>
+
+<!-- ==================== XBOX BOOT SPLASH ==================== -->
+<div id="xbox-boot">
+  <div class="xbox-orb">
+    <svg width="78" height="78" viewBox="0 0 100 100" fill="none">
+      <path d="M22 20 C36 30 64 56 80 80 M78 20 C64 30 36 56 20 80" stroke="#ffffff" stroke-width="11" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="xbox-boot-title">XBOX</div>
+  <div class="xbox-boot-sub">DASHX360 · NATIVE SERIES X EMULATOR TARGET</div>
+</div>
+
+<!-- ==================== METRO DASHBOARD SHELL (ZivvoZ/dashx360) ==================== -->
+<div id="metro-shell">
+  <div class="metro-top">
+    <div class="metro-brand">
+      <span class="metro-dot"></span>
+      <span id="xboxPortTag">XBOX SERIES X NATIVE · GTA V MOUNTED</span>
+    </div>
+    <div class="metro-profile-box" id="btnGuideTop" title="Open Xbox Guide (Y / G)">
+      <div class="metro-profile-meta">
+        <div class="metro-gamertag">
+          <span class="gp-badge" id="hdrGpBadge">ULTIMATE</span>
+          <span id="hdrGamertag">Player</span>
+        </div>
+        <div class="metro-gscore"><span>ⓖ</span><span id="hdrGscore">14,820</span></div>
+      </div>
+      <img class="metro-avatar" id="hdrGamerpic" src="" alt="Gamerpic">
+    </div>
+  </div>
+
+  <nav class="metro-tabs" id="metroTabs"></nav>
+  <main class="metro-content" id="metroContent"></main>
+
+  <footer class="xbox-footer">
+    <div class="x-prompts">
+      <span><span class="x-pill x-a">A</span>Select / Play</span>
+      <span><span class="x-pill x-b">B</span>Back</span>
+      <span><span class="x-pill x-x">X</span>Game Details</span>
+      <span style="cursor:pointer;" id="btnGuideFooter"><span class="x-pill x-y">Y</span>Xbox Guide</span>
+    </div>
+    <div id="xboxPadStatus" style="font-size:12.5px;opacity:0.88;">DashX360 · Keyboard &amp; Controller Active</div>
+  </footer>
+</div>
+
+<!-- ==================== CLASSIC BLADES DASHBOARD (DashX360 v1.3.0) ==================== -->
+<div id="blades-shell">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div style="font-size:20px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:10px;">
+      <span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#16a34a;color:#fff;align-items:center;justify-content:center;font-weight:900;">X</span>
+      Xbox 360 Blades Dashboard (DashX360)
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="x-btn" id="btnBladesToMetro">Switch to Metro UI</button>
+      <button class="x-btn ps5" id="btnBladesGuide">Xbox Guide (Y)</button>
+    </div>
+  </div>
+  <div class="blades-accordion" id="bladesAccordion"></div>
+</div>
+
+<!-- ==================== XBOX GUIDE OVERLAY ==================== -->
+<div id="xbox-guide">
+  <div class="guide-card">
+    <h3><span style="display:inline-flex;width:26px;height:26px;border-radius:50%;background:#16a34a;align-items:center;justify-content:center;font-weight:900;font-size:14px;">X</span> Xbox Guide</h3>
+    <div style="font-size:13px;color:#cbd5e1;margin-bottom:14px;" id="guideUserSub">Signed in · Live Telemetry</div>
+    <button class="guide-btn" id="gPlayMounted"><span>Launch Mounted Game</span><strong id="gMountedName">GTA V</strong></button>
+    <button class="guide-btn" id="gToggleStyle"><span>Switch Dashboard Style</span><strong id="gStyleLbl">Metro → Blades</strong></button>
+    <button class="guide-btn" id="gOpenJailbreak"><span>Open Settings → Jailbreak</span><strong>CFW</strong></button>
+    <button class="guide-btn" id="gSwitchPs5" style="border-color:#60a5fa;background:rgba(0,112,209,0.28);"><span>Switch to PlayStation 5 Emulator</span><strong>PS5 →</strong></button>
+    <button class="guide-btn" id="gReplayBoot"><span>Replay Xbox Boot Animation</span><strong>↻</strong></button>
+    <button class="guide-btn" id="gCloseGuide" style="margin-top:6px;background:rgba(255,255,255,0.04);"><span>Close Guide</span><strong>B / Esc</strong></button>
+  </div>
+</div>
+
+<!-- ==================== SYSTEM MODAL ==================== -->
+<div id="xbox-modal">
+  <div class="guide-card">
+    <h3 id="xModalTitle">Xbox System</h3>
+    <div id="xModalBody" style="margin-bottom:18px;font-size:15px;line-height:1.55;color:#e2e8f0;"></div>
+    <div id="xModalActions" style="display:flex;justify-content:flex-end;gap:10px;"></div>
+  </div>
+</div>
+
+<div id="xbox-toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const GAMERPICS = [
+    { id: 'chief', label: 'Spartan', svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23143a1f"/><polygon points="22,68 30,24 70,24 78,68 62,82 38,82" fill="%233f6212"/><polygon points="32,38 68,38 62,56 38,56" fill="%23f59e0b"/></svg>' },
+    { id: 'xbox', label: 'Xbox Sphere', svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23091f10"/><circle cx="50" cy="50" r="34" fill="%2316a34a"/><path d="M30 30 Q50 48 70 70 M70 30 Q50 48 30 70" stroke="%23fff" stroke-width="8" stroke-linecap="round"/></svg>' },
+    { id: 'vice', label: 'Leonida', svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="%23ff2e88"/><stop offset="100%" stop-color="%23ff9347"/></linearGradient></defs><rect width="100" height="100" fill="url(%23g)"/><text x="50" y="62" text-anchor="middle" font-family="Arial Black" font-size="38" fill="%23fff">VI</text></svg>' },
+    { id: 'forza', label: 'Horizon', svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23dc2626"/><polygon points="15,62 45,30 86,30 70,48 48,48 35,62" fill="%23fff"/><text x="56" y="78" text-anchor="middle" font-family="Arial Black" font-size="24" fill="%23fde047">FH5</text></svg>' },
+    { id: 'fox', label: 'Foxxy Dev', svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23091620"/><polygon points="22,22 44,38 26,54" fill="%23f97316"/><polygon points="78,22 56,38 74,54" fill="%23f97316"/><polygon points="26,42 74,42 50,82" fill="%23fb923c"/><circle cx="40" cy="54" r="3.5" fill="%23111"/><circle cx="60" cy="54" r="3.5" fill="%23111"/></svg>' }
+  ];
+
+  // 9 REAL GAMES WITH REAL ORIGINAL THUMBNAILS (Starting with GTA VI & GTA V)
+  const GAMES = [
+    { id: 'gta6', name: 'Grand Theft Auto VI', shortName: 'gta 6', tag: 'Xbox Series X|S · Cyberleeks', thumb: '/vbx/img/gta6_thumb.jpg', hero: '/vbx/img/gta6_hero.jpg', desc: 'Explore Leonida and Vice City on Xbox Series X.' },
+    { id: 'gta5', name: 'Grand Theft Auto V', shortName: 'gta 5', tag: 'Xbox Series X|S · Native Target', thumb: '/vbx/img/gta5_thumb.jpg', hero: '/vbx/img/gta5_hero.jpg', desc: 'Los Santos & Blaine County with full PC Cheat Menu, real CPU/GPU/FPS HUD, Xbox/DualSense controller support, Motion Blur & Optimization Mode.' },
+    { id: 'halo', name: 'Halo Infinite', shortName: 'halo infinite', tag: 'Xbox Series X|S · Game Pass', thumb: '/vbx/img/halo_thumb.jpg', hero: '/vbx/img/halo_hero.jpg', desc: 'Step inside the armor of humanity\'s greatest hero across Zeta Halo.' },
+    { id: 'forza', name: 'Forza Horizon 5', shortName: 'forza horizon 5', tag: 'Xbox Series X|S · Game Pass', thumb: '/vbx/img/forza_thumb.jpg', hero: '/vbx/img/forza_hero.jpg', desc: 'Lead breathtaking expeditions across the vibrant open landscapes of Mexico.' },
+    { id: 'rdr2', name: 'Red Dead Redemption 2', shortName: 'red dead redemption 2', tag: 'Xbox One X Enhanced', thumb: '/vbx/img/rdr2_thumb.jpg', hero: '/vbx/img/rdr2_hero.jpg', desc: 'Arthur Morgan and the Van der Linde gang in America, 1899.' },
+    { id: 'cyberpunk', name: 'Cyberpunk 2077: Phantom Liberty', shortName: 'cyberpunk 2077', tag: 'Xbox Series X|S', thumb: '/vbx/img/cyberpunk_thumb.jpg', hero: '/vbx/img/cyberpunk_hero.jpg', desc: 'High-stakes espionage and cybernetic action in Night City.' },
+    { id: 'eldenring', name: 'ELDEN RING', shortName: 'elden ring', tag: 'Xbox Series X|S', thumb: '/vbx/img/eldenring_thumb.jpg', hero: '/vbx/img/eldenring_hero.jpg', desc: 'Journey through the Lands Between to claim the Elden Ring.' },
+    { id: 'spiderman2', name: "Marvel's Spider-Man 2", shortName: 'spider-man 2', tag: 'Cross-Mounted Title', thumb: '/vbx/img/spiderman2_thumb.jpg', hero: '/vbx/img/spiderman2_hero.jpg', desc: 'Peter Parker & Miles Morales swing across Marvel\'s New York.' },
+    { id: 'gow', name: 'God of War Ragnarök', shortName: 'god of war ragnarok', tag: 'Cross-Mounted Title', thumb: '/vbx/img/gow_thumb.jpg', hero: '/vbx/img/gow_hero.jpg', desc: 'Kratos and Atreus journey across the Nine Realms.' }
+  ];
+
+  const TABS = ['bing', 'home', 'social', 'games', 'apps', 'music', 'video', 'settings'];
+
+  const state = {
+    bootDone: false,
+    dashStyle: 'metro', // 'metro' | 'blades'
+    theme: 'classic',   // 'classic' | 'seriesx' | 'emerald' | 'vice'
+    activeTab: 'home',
+    activeBlade: 2,     // Games blade default
+    selectedGameIdx: 1, // GTA V default
+    activeSetCat: 0,
+    emulatedGame: 'gta5',
+    profileName: 'Player',
+    gamerpic: GAMERPICS[1].svg,
+    gamerscore: 14820,
+    gamePassTier: 'Ultimate', // 'None' | 'Core' | 'Ultimate'
+    optimizationMode: false,
+    motionBlur: false,
+    motionBlurStrength: 55,
+    showDebugHud: true,
+    enableCheatMenu: true,
+    gta5Url: '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1',
+    guideOpen: false,
+    modalOpen: false,
+    soundOn: true,
+    telemetry: { cpuPct: 0, gpuPct: 0, vramUsedMb: 0, ramUsedGb: 0, ramTotalGb: 16, gpuName: 'Direct3D 11 GPU' }
+  };
+
+  // ==================== PROCEDURAL XBOX 360 / METRO WEBAUDIO SFX ====================
+  let ac = null;
+  function xboxSfx(kind) {
+    if (!state.soundOn) return;
+    if (!ac) { const C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
+    if (!ac) return;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    const t = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain();
+    if (kind === 'nav') {
+      o.type = 'sine'; o.frequency.setValueAtTime(640, t); o.frequency.exponentialRampToValueAtTime(920, t + 0.035);
+      g.gain.setValueAtTime(0.09, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.06);
+    } else if (kind === 'blade') {
+      o.type = 'triangle'; o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(520, t + 0.12);
+      g.gain.setValueAtTime(0.11, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.15);
+    } else if (kind === 'ok') {
+      [523.25, 783.99].forEach((f, i) => {
+        const os = ac.createOscillator(), gn = ac.createGain();
+        os.type = 'sine'; os.frequency.setValueAtTime(f, t + i * 0.04);
+        gn.gain.setValueAtTime(0.12, t + i * 0.04); gn.gain.exponentialRampToValueAtTime(0.001, t + i * 0.04 + 0.15);
+        os.connect(gn).connect(ac.destination); os.start(t + i * 0.04); os.stop(t + i * 0.04 + 0.16);
+      });
+    } else if (kind === 'err') {
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(175, t); o.frequency.linearRampToValueAtTime(120, t + 0.16);
+      g.gain.setValueAtTime(0.11, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.19);
+    } else if (kind === 'boot') {
+      [196, 293.66, 392, 587.33].forEach((f, i) => {
+        const os = ac.createOscillator(), gn = ac.createGain();
+        os.type = 'sine'; os.frequency.setValueAtTime(f, t + i * 0.08);
+        gn.gain.setValueAtTime(0.001, t + i * 0.08);
+        gn.gain.linearRampToValueAtTime(0.09, t + i * 0.08 + 0.15);
+        gn.gain.exponentialRampToValueAtTime(0.0008, t + 1.35);
+        os.connect(gn).connect(ac.destination); os.start(t + i * 0.08); os.stop(t + 1.4);
+      });
+    }
+  }
+
+  let toastTimer = null;
+  function showToast(msg) {
+    const el = document.getElementById('xbox-toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  }
+
+  function openModal(title, html, actions) {
+    state.modalOpen = true;
+    document.getElementById('xModalTitle').textContent = title;
+    document.getElementById('xModalBody').innerHTML = html;
+    const act = document.getElementById('xModalActions');
+    act.innerHTML = '';
+    (actions || [{ label: 'OK', fn: closeModal }]).forEach((a) => {
+      const b = document.createElement('button');
+      b.className = 'x-btn' + (a.ghost ? ' ghost' : '');
+      b.textContent = a.label;
+      b.onclick = () => { xboxSfx('ok'); a.fn(); };
+      act.appendChild(b);
+    });
+    document.getElementById('xbox-modal').classList.add('open');
+  }
+  function closeModal() { state.modalOpen = false; document.getElementById('xbox-modal').classList.remove('open'); }
+
+  // ==================== BOOT ANIMATION ====================
+  function finishBoot() {
+    if (state.bootDone) return;
+    state.bootDone = true;
+    xboxSfx('boot');
+    document.getElementById('xbox-boot').classList.add('hidden');
+  }
+  setTimeout(finishBoot, 2100);
+  document.getElementById('xbox-boot').onclick = finishBoot;
+
+  // ==================== THEME & PROFILE SYNC ====================
+  function applyTheme() {
+    document.body.className = state.theme === 'classic' ? '' : ('theme-' + state.theme);
+  }
+
+  function syncChrome() {
+    document.getElementById('hdrGamertag').textContent = state.profileName;
+    document.getElementById('hdrGamerpic').src = state.gamerpic;
+    document.getElementById('hdrGscore').textContent = Number(state.gamerscore).toLocaleString();
+    const gp = document.getElementById('hdrGpBadge');
+    gp.style.display = state.gamePassTier !== 'None' ? 'inline-block' : 'none';
+    gp.textContent = state.gamePassTier.toUpperCase();
+
+    const mounted = state.emulatedGame === 'gta6' ? 'GTA VI (DEV)' : 'GTA V MOUNTED';
+    document.getElementById('xboxPortTag').textContent = 'XBOX SERIES X NATIVE · ' + mounted;
+    document.getElementById('gMountedName').textContent = state.emulatedGame === 'gta6' ? 'GTA VI' : 'GTA V';
+    document.getElementById('gStyleLbl').textContent = state.dashStyle === 'metro' ? 'Metro → Blades' : 'Blades → Metro';
+
+    document.getElementById('metro-shell').classList.toggle('hidden', state.dashStyle !== 'metro');
+    document.getElementById('blades-shell').classList.toggle('active', state.dashStyle === 'blades');
+    applyTheme();
+  }
+
+  function pushConfig(patch) {
+    Object.assign(state, patch);
+    saveLocalPrefs();
+    syncChrome();
+    fetch('/vbx/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    }).catch(() => {});
+  }
+
+  // ==================== LAUNCH GAME (STRICT EMULATION LOCK + FOXXY DEV .EXE) ====================
+  async function launchGame(game) {
+    if (!game) return;
+    if (game.id !== state.emulatedGame) {
+      xboxSfx('err');
+      const msg = (game.id === 'gta6')
+        ? 'you did not emulate gta 6. gta 6 doesnt exist in this xbox emulator.'
+        : `you did not emulate ${game.shortName}. ${game.shortName} doesnt exist in this xbox emulator.`;
+      const acts = [{ label: 'OK', fn: closeModal }];
+      if (game.id === 'gta6') {
+        acts.unshift({ label: 'View GTA 6 Updates', ghost: true, fn: () => { window.location.href = '/updates/gta6'; } });
+      }
+      openModal('Game Not Emulated', `<p>${msg}</p>`, acts);
+      return;
+    }
+
+    if (game.id === 'gta5') {
+      xboxSfx('ok');
+      showToast('Launching Grand Theft Auto V (Xbox Series X Native)...');
+      const base = state.gta5Url || '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1';
+      const sep = base.includes('?') ? '&' : '?';
+      const url = base + sep
+        + 'vbx_console=xbox'
+        + '&vbx_hud=' + (state.showDebugHud ? '1' : '0')
+        + '&vbx_cheats=' + (state.enableCheatMenu ? '1' : '0')
+        + '&vbx_mblur=' + (state.motionBlur ? '1' : '0')
+        + '&vbx_mblur_str=' + state.motionBlurStrength
+        + '&vbx_opt=' + (state.optimizationMode ? '1' : '0');
+      setTimeout(() => { window.location.href = url; }, 350);
+      return;
+    }
+
+    if (game.id === 'gta6') {
+      xboxSfx('ok');
+      showToast('Launching GTA VI Developer Executable...');
+      try {
+        const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
+        const d = await res.json();
+        if (d.ok) {
+          openModal('GTA VI Developer Build Launched', `<p>Executed custom target:<br><code style="color:#4ade80;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Started directly from Xbox DashX360 UI.</p>`);
+        } else {
+          openModal('GTA VI Launch Error', `<p>${d.error || 'Set a custom .exe in Foxxy Developer Settings first.'}</p>`);
+        }
+      } catch (e) {
+        openModal('Bridge Error', '<p>Unable to reach local ViceBox X server.</p>');
+      }
+    }
+  }
+
+  // ==================== METRO TABS & VIEWS ====================
+  function renderMetroTabs() {
+    const bar = document.getElementById('metroTabs');
+    bar.innerHTML = '';
+    TABS.forEach((t) => {
+      const b = document.createElement('button');
+      b.className = 'metro-tab' + (t === state.activeTab ? ' active' : '');
+      b.textContent = t;
+      b.onclick = () => {
+        if (state.activeTab !== t) xboxSfx('nav');
+        state.activeTab = t;
+        renderMetroTabs();
+        renderMetroContent();
+      };
+      bar.appendChild(b);
+    });
+  }
+
+  function renderMetroContent() {
+    const host = document.getElementById('metroContent');
+    const mountedGame = GAMES.find(g => g.id === state.emulatedGame) || GAMES[1];
+
+    if (state.activeTab === 'home') {
+      host.innerHTML = `
+        <div class="metro-home-grid">
+          <div class="m-tile" id="tOpenTray">
+            <div class="m-tile-ico">💿</div>
+            <div class="m-tile-title">Play ${mountedGame.name}</div>
+            <div class="m-tile-sub">Mounted XVD Disc</div>
+          </div>
+          <div class="m-tile img-tile hero-span" id="tHeroMain" style="background-image:url('${mountedGame.hero}')">
+            <span class="m-em-badge">READY TO PLAY</span>
+            <div class="m-tile-title" style="font-size:24px;font-weight:500;">${mountedGame.name}</div>
+            <div class="m-tile-sub">${mountedGame.desc}</div>
+          </div>
+          <div class="m-tile img-tile" id="tRight1" style="background-image:url('/vbx/img/gta6_hero.jpg')">
+            <div class="m-tile-title">Grand Theft Auto VI</div>
+            <div class="m-tile-sub">${state.emulatedGame === 'gta6' ? 'Dev Build Ready' : 'Cyberleeks Updates'}</div>
+          </div>
+
+          <div class="m-tile" id="tMyPins">
+            <div class="m-tile-ico">📌</div>
+            <div class="m-tile-title">My Games (${GAMES.length})</div>
+            <div class="m-tile-sub">Full Library</div>
+          </div>
+          <div class="m-tile img-tile" id="tRight2" style="background-image:url('/vbx/img/halo_hero.jpg')">
+            <div class="m-tile-title">Halo Infinite</div>
+            <div class="m-tile-sub">Zeta Halo</div>
+          </div>
+
+          <div class="m-tile" id="tRecent">
+            <div class="m-tile-ico">⚙</div>
+            <div class="m-tile-title">Settings &amp; Jailbreak</div>
+            <div class="m-tile-sub">Blades · PS5 Switch</div>
+          </div>
+          <div class="m-tile img-tile" id="tBot1" style="background-image:url('/vbx/img/forza_hero.jpg')">
+            <div class="m-tile-title">Forza Horizon 5</div>
+            <div class="m-tile-sub">Mexico Festival</div>
+          </div>
+          <div class="m-tile img-tile" id="tBot2" style="background-image:url('/vbx/img/rdr2_hero.jpg')">
+            <div class="m-tile-title">Red Dead Redemption 2</div>
+            <div class="m-tile-sub">Rockstar Games</div>
+          </div>
+          <div class="m-tile" id="tBot3" style="background:linear-gradient(135deg,#00439c,#0070d1);">
+            <div class="m-tile-ico">🎮</div>
+            <div class="m-tile-title">Switch to PS5</div>
+            <div class="m-tile-sub">PS5 Dashboard</div>
+          </div>
+        </div>
+      `;
+      host.querySelector('#tOpenTray').onclick = () => launchGame(mountedGame);
+      host.querySelector('#tHeroMain').onclick = () => launchGame(mountedGame);
+      host.querySelector('#tRight1').onclick = () => launchGame(GAMES[0]);
+      host.querySelector('#tMyPins').onclick = () => { state.activeTab = 'games'; renderMetroTabs(); renderMetroContent(); };
+      host.querySelector('#tRight2').onclick = () => launchGame(GAMES[2]);
+      host.querySelector('#tRecent').onclick = () => { state.activeTab = 'settings'; state.activeSetCat = 5; renderMetroTabs(); renderMetroContent(); };
+      host.querySelector('#tBot1').onclick = () => launchGame(GAMES[3]);
+      host.querySelector('#tBot2').onclick = () => launchGame(GAMES[4]);
+      host.querySelector('#tBot3').onclick = () => switchToPs5();
+    } else if (state.activeTab === 'games') {
+      const sel = GAMES[state.selectedGameIdx] || GAMES[1];
+      host.innerHTML = `
+        <div class="metro-games-hdr">
+          <h2>My Games</h2>
+          <div style="font-size:15px;opacity:0.9;">${state.selectedGameIdx + 1} of ${GAMES.length} · <strong>${sel.name}</strong></div>
+        </div>
+        <div class="metro-games-strip" id="xGamesStrip"></div>
+        <div class="x-game-bar">
+          <div>
+            <div style="font-size:18px;font-weight:500;">${sel.name}</div>
+            <div style="font-size:13px;color:var(--metro-muted);">${sel.desc}</div>
+          </div>
+          <div style="display:flex;gap:10px;flex-shrink:0;">
+            <button class="x-btn" id="btnLaunchSelGame">▶ Launch Game</button>
+            <button class="x-btn ghost" id="btnSelGameDetails">Details</button>
+          </div>
+        </div>
+      `;
+      const strip = host.querySelector('#xGamesStrip');
+      GAMES.forEach((g, idx) => {
+        const c = document.createElement('div');
+        c.className = 'x-game-card' + (idx === state.selectedGameIdx ? ' active' : '');
+        const isEm = g.id === state.emulatedGame;
+        c.innerHTML = `
+          ${isEm ? '<span class="m-em-badge">EMULATED</span>' : ''}
+          <img class="x-game-art" src="${g.thumb}" alt="${g.name}">
+          <div class="x-game-meta">
+            <div class="x-game-name">${g.name}</div>
+            <div class="x-game-sub">${isEm ? 'Mounted · Ready' : g.tag}</div>
+          </div>
+        `;
+        c.onclick = () => {
+          if (state.selectedGameIdx === idx) { launchGame(g); return; }
+          xboxSfx('nav');
+          state.selectedGameIdx = idx;
+          renderMetroContent();
+        };
+        strip.appendChild(c);
+      });
+      const activeEl = strip.children[state.selectedGameIdx];
+      if (activeEl) activeEl.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+      host.querySelector('#btnLaunchSelGame').onclick = () => launchGame(sel);
+      host.querySelector('#btnSelGameDetails').onclick = () => openModal(sel.name, `<p>${sel.desc}</p><p>Status: <b>${sel.id === state.emulatedGame ? 'MOUNTED & EMULATED' : 'NOT EMULATED'}</b></p>`);
+    } else if (state.activeTab === 'bing') {
+      host.innerHTML = `
+        <h2 style="font-weight:300;font-size:28px;margin:0 0 12px;">bing search</h2>
+        <input class="x-input" id="bingInp" placeholder="Search your Xbox library (e.g. GTA V, GTA VI, Halo, Forza)..." style="width:100%;max-width:560px;padding:12px 16px;font-size:16px;margin-bottom:16px;">
+        <div id="bingOut" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;overflow-y:auto;"></div>
+      `;
+      const inp = host.querySelector('#bingInp');
+      const out = host.querySelector('#bingOut');
+      const renderBing = () => {
+        const q = inp.value.trim().toLowerCase();
+        out.innerHTML = '';
+        GAMES.filter(g => !q || g.name.toLowerCase().includes(q)).forEach((g) => {
+          const d = document.createElement('div');
+          d.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px;background:rgba(16,20,24,0.82);border:1px solid rgba(255,255,255,0.16);cursor:pointer;';
+          d.innerHTML = `<img src="${g.thumb}" style="width:58px;height:58px;object-fit:cover;"><div><div style="font-weight:600;">${g.name}</div><div style="font-size:12px;color:#94a3b8;">${g.id === state.emulatedGame ? 'Playable Now' : 'Not Emulated'}</div></div>`;
+          d.onclick = () => launchGame(g);
+          out.appendChild(d);
+        });
+      };
+      inp.oninput = renderBing;
+      inp.onkeydown = (e) => e.stopPropagation();
+      renderBing();
+    } else if (state.activeTab === 'social') {
+      host.innerHTML = `
+        <div style="display:grid;grid-template-columns:340px 1fr;gap:18px;max-height:460px;">
+          <div style="background:var(--metro-panel);border:1px solid rgba(255,255,255,0.18);padding:24px;text-align:center;">
+            <img src="${state.gamerpic}" style="width:110px;height:110px;border:3px solid #22c55e;object-fit:cover;margin-bottom:14px;">
+            <div style="font-size:24px;font-weight:500;">${escapeHtml(state.profileName)}</div>
+            <div style="color:#4ade80;margin:6px 0 14px;">ⓖ ${Number(state.gamerscore).toLocaleString()} Gamerscore · ${state.gamePassTier !== 'None' ? 'Game Pass ' + state.gamePassTier : 'Standard'}</div>
+            <button class="x-btn" id="btnEditSoc">Customize Profile in Jailbreak</button>
+          </div>
+          <div style="background:var(--metro-panel);border:1px solid rgba(255,255,255,0.18);padding:24px;">
+            <h3 style="margin:0 0 14px;font-weight:300;font-size:22px;">Xbox Live Activity</h3>
+            <div class="x-row"><div><div class="lbl">Current Session</div><div class="desc">ViceBox X Native Xbox Series X Hypervisor</div></div><span style="color:#4ade80;font-weight:700;">ONLINE</span></div>
+            <div class="x-row"><div><div class="lbl">Mounted Disc</div><div class="desc">${mountedGame.name}</div></div><button class="x-btn" id="btnSocPlay">Play</button></div>
+            <div class="x-row"><div><div class="lbl">Credits</div><div class="desc">Original project by zivvoz / DashX360 — inspired by Microsoft's Xbox 360 Dashboard interfaces.</div></div></div>
+          </div>
+        </div>
+      `;
+      host.querySelector('#btnEditSoc').onclick = () => { state.activeTab = 'settings'; state.activeSetCat = 5; renderMetroTabs(); renderMetroContent(); };
+      host.querySelector('#btnSocPlay').onclick = () => launchGame(mountedGame);
+    } else if (state.activeTab === 'apps' || state.activeTab === 'music' || state.activeTab === 'video') {
+      const items = state.activeTab === 'apps'
+        ? [['YouTube', '#dc2626', '▶'], ['Netflix', '#b91c1c', 'N'], ['Twitch', '#7c3aed', '◈'], ['Microsoft Edge', '#0284c7', 'e']]
+        : state.activeTab === 'music'
+        ? [['Spotify', '#16a34a', '♫'], ['SoundCloud', '#ea580c', '☁'], ['Xbox Music', '#107c10', '♪']]
+        : [['Xbox Video', '#15803d', '🎬'], ['Disney+', '#1d4ed8', '★'], ['Prime Video', '#0284c7', '▶']];
+      host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;">
+        ${items.map(([n, c, i]) => `<div class="m-tile" style="height:170px;background:${c};" onclick="window.__xMediaClick('${n}')"><div class="m-tile-ico">${i}</div><div class="m-tile-title">${n}</div></div>`).join('')}
+      </div>`;
+      window.__xMediaClick = (n) => openModal(n, `<p>${n} hub preview inside DashX360 ${state.activeTab} tab.</p>`);
+    } else if (state.activeTab === 'settings') {
+      renderXboxSettings(host);
+    }
+  }
+
+  // ==================== XBOX SETTINGS + JAILBREAK TAB ====================
+  const X_SET_CATS = [
+    { id: 'system',  ico: '⚙', label: 'System & Dashboard' },
+    { id: 'display', ico: '🖥', label: 'Display & Optimization' },
+    { id: 'pad',     ico: '🎮', label: 'Controller & GTA V Map' },
+    { id: 'themes',  ico: '🎨', label: 'Themes & Blades UI' },
+    { id: 'about',   ico: 'ⓘ', label: 'Console & Hardware' },
+    { id: 'jailbreak', ico: '⚡', label: 'Jailbreak', jb: true }
+  ];
+
+  function renderXboxSettings(host) {
+    host.innerHTML = `<div class="x-settings-wrap"><div class="x-settings-nav" id="xSetNav"></div><div class="x-settings-pane" id="xSetPane"></div></div>`;
+    const nav = host.querySelector('#xSetNav');
+    X_SET_CATS.forEach((c, idx) => {
+      const b = document.createElement('button');
+      b.className = 'x-set-btn' + (idx === state.activeSetCat ? ' active' : '') + (c.jb ? ' jb' : '');
+      b.innerHTML = `<span>${c.ico}</span><span>${c.label}</span>`;
+      b.onclick = () => { xboxSfx('nav'); state.activeSetCat = idx; renderXboxSettings(host); };
+      nav.appendChild(b);
+    });
+    const pane = host.querySelector('#xSetPane');
+    const cat = X_SET_CATS[state.activeSetCat];
+
+    if (cat.id === 'system') {
+      pane.innerHTML = `
+        <h2>System &amp; Dashboard</h2>
+        <div class="sub">DashX360 Xbox Series X / 360 native target configuration.</div>
+        <div class="x-row"><div><div class="lbl">Dashboard Style</div><div class="desc">Switch between Xbox 360 Metro and Classic 5-Blade Accordion</div></div>
+          <button class="x-btn" id="btnFlipStyle">${state.dashStyle === 'metro' ? 'Switch to Classic Blades' : 'Switch to Metro'}</button></div>
+        <div class="x-row"><div><div class="lbl">Dashboard Sound Effects</div><div class="desc">Play classic Xbox clicks, blade swooshes &amp; boot chime</div></div>
+          <input type="checkbox" id="chkSfx" ${state.soundOn ? 'checked' : ''} style="width:22px;height:22px;"></div>
+        <div class="x-row"><div><div class="lbl">Replay Xbox Boot Animation</div><div class="desc">Plays the glowing green Xbox boot splash</div></div>
+          <button class="x-btn ghost" id="btnRepBoot">Replay Boot</button></div>
+      `;
+      pane.querySelector('#btnFlipStyle').onclick = () => toggleDashStyle();
+      pane.querySelector('#chkSfx').onchange = (e) => { state.soundOn = e.target.checked; saveLocalPrefs(); };
+      pane.querySelector('#btnRepBoot').onclick = () => replayBoot();
+    } else if (cat.id === 'display') {
+      pane.innerHTML = `
+        <h2>Display, Optimization &amp; Motion Blur</h2>
+        <div class="sub">Real performance &amp; visual enhancements synced with GTA V gameplay.</div>
+        <div class="x-row"><div><div class="lbl">Optimization Mode (Keep Same Visuals)</div><div class="desc">Locks discrete high-performance GPU, clamps HiDPI fillrate &amp; trims hidden PostFX/MSAA overhead</div></div>
+          <input type="checkbox" id="xOpt" ${state.optimizationMode ? 'checked' : ''} style="width:22px;height:22px;"></div>
+        <div class="x-row"><div><div class="lbl">Motion Blur (Stutter Smoothing)</div><div class="desc">Masks frame stutters smoothly during fast driving &amp; camera movement</div></div>
+          <input type="checkbox" id="xMb" ${state.motionBlur ? 'checked' : ''} style="width:22px;height:22px;"></div>
+        <div class="x-row"><div><div class="lbl">Motion Blur Intensity (<span id="xMbLbl">${state.motionBlurStrength}%</span>)</div><div class="desc">Adjust temporal + velocity blur strength</div></div>
+          <input type="range" id="xMbStr" min="0" max="100" value="${state.motionBlurStrength}" style="width:200px;"></div>
+        <div class="x-row"><div><div class="lbl">Real Hardware Debug HUD (CPU / GPU / FPS)</div><div class="desc">Displays real Windows CPU %, GPU 3D %, VRAM &amp; real FPS on GTA V (toggle F3)</div></div>
+          <input type="checkbox" id="xHud" ${state.showDebugHud ? 'checked' : ''} style="width:22px;height:22px;"></div>
+        <div class="x-row"><div><div class="lbl">In-Game Cheat Menu (F2 / L3+R3)</div><div class="desc">Full GTA V trainer overlay (Vehicles, Weapons, God Mode, Fly, Dev Console)</div></div>
+          <input type="checkbox" id="xCheats" ${state.enableCheatMenu ? 'checked' : ''} style="width:22px;height:22px;"></div>
+      `;
+      pane.querySelector('#xOpt').onchange = (e) => { pushConfig({ optimizationMode: e.target.checked }); showToast('Optimization Mode ' + (e.target.checked ? 'ON' : 'OFF')); };
+      pane.querySelector('#xMb').onchange = (e) => { pushConfig({ motionBlur: e.target.checked }); showToast('Motion Blur ' + (e.target.checked ? 'ON' : 'OFF')); };
+      pane.querySelector('#xMbStr').oninput = (e) => { const v = parseInt(e.target.value, 10) || 0; pane.querySelector('#xMbLbl').textContent = v + '%'; pushConfig({ motionBlurStrength: v }); };
+      pane.querySelector('#xHud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
+      pane.querySelector('#xCheats').onchange = (e) => pushConfig({ enableCheatMenu: e.target.checked });
+    } else if (cat.id === 'pad') {
+      const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+      pane.innerHTML = `
+        <h2>Controller &amp; Real GTA V Default Mapping</h2>
+        <div class="sub">Supports Xbox Series X|S, Xbox 360, and PlayStation DualSense controllers in both DashX360 and GTA V.</div>
+        <div class="x-row"><div><div class="lbl">Detected Controller</div><div class="desc">${escapeHtml(pads.length ? pads[0].id : 'Press any button on your controller to pair')}</div></div>
+          <button class="x-btn" id="xVibe">Test Rumble</button></div>
+        <div class="x-row"><div><div class="lbl">DashX360 Navigation</div><div class="desc">D-Pad / L-Stick Navigate · A Select · B Back · LB / RB Switch Tabs &amp; Blades · Y Xbox Guide</div></div></div>
+        <div class="x-row"><div><div class="lbl">GTA V Default Controls</div><div class="desc">RT Shoot / Gas · LT Aim / Brake · RB Cover / Handbrake · LB Weapon Wheel · A Sprint · X Jump · B Reload · Y Enter/Exit Vehicle · LS+RS Cheat Menu</div></div></div>
+      `;
+      pane.querySelector('#xVibe').onclick = () => {
+        const gp = navigator.getGamepads && Array.from(navigator.getGamepads()).find(Boolean);
+        if (gp && gp.vibrationActuator && gp.vibrationActuator.playEffect) {
+          gp.vibrationActuator.playEffect('dual-rumble', { duration: 250, strongMagnitude: 0.7, weakMagnitude: 0.5 });
+          showToast('Controller rumble tested!');
+        } else showToast('Connect an Xbox or DualSense controller first.');
+      };
+    } else if (cat.id === 'themes') {
+      pane.innerHTML = `
+        <h2>Themes &amp; Classic Blades Dashboard</h2>
+        <div class="sub">Inspired by ZivvoZ/dashx360 custom themes and Blades v1.3.0.</div>
+        <div class="x-row"><div><div class="lbl">Dashboard Interface</div><div class="desc">Pick Metro (2011–2013) or Classic Blades (2005–2008)</div></div>
+          <div style="display:flex;gap:8px;">
+            <button class="x-btn ${state.dashStyle === 'metro' ? '' : 'ghost'}" id="setMetroBtn">Metro</button>
+            <button class="x-btn ${state.dashStyle === 'blades' ? '' : 'ghost'}" id="setBladesBtn">Classic Blades</button>
+          </div></div>
+        <div class="x-row"><div><div class="lbl">Color Theme</div><div class="desc">Changes Metro background &amp; accent palette instantly</div></div>
+          <select class="x-select" id="selTheme">
+            <option value="classic" ${state.theme === 'classic' ? 'selected' : ''}>Xbox 360 Classic Silver</option>
+            <option value="seriesx" ${state.theme === 'seriesx' ? 'selected' : ''}>Xbox Series X Dark</option>
+            <option value="emerald" ${state.theme === 'emerald' ? 'selected' : ''}>Emerald Night</option>
+            <option value="vice" ${state.theme === 'vice' ? 'selected' : ''}>Vice City Neon</option>
+          </select></div>
+      `;
+      pane.querySelector('#setMetroBtn').onclick = () => { state.dashStyle = 'metro'; saveLocalPrefs(); syncChrome(); };
+      pane.querySelector('#setBladesBtn').onclick = () => { state.dashStyle = 'blades'; saveLocalPrefs(); syncChrome(); renderBlades(); };
+      pane.querySelector('#selTheme').onchange = (e) => { state.theme = e.target.value; saveLocalPrefs(); applyTheme(); };
+    } else if (cat.id === 'about') {
+      const t = state.telemetry;
+      pane.innerHTML = `
+        <h2>Console &amp; Real PC Hardware</h2>
+        <div class="sub">Original project by zivvoz / DashX360 — inspired by Microsoft's Xbox 360 Dashboard interfaces.</div>
+        <div class="x-row"><div><div class="lbl">Host GPU Adapter</div><div class="desc">${escapeHtml(t.gpuName || 'Direct3D 11 GPU')}</div></div><span style="color:#4ade80;font-weight:700;">${(t.gpuPct||0).toFixed(0)}% 3D</span></div>
+        <div class="x-row"><div><div class="lbl">Host CPU Utilization (Real)</div><div class="desc">Measured live via Windows GetSystemTimes</div></div><span style="color:#38bdf8;font-weight:700;">${(t.cpuPct||0).toFixed(1)}%</span></div>
+        <div class="x-row"><div><div class="lbl">RAM / VRAM Used (Real)</div><div class="desc">Live memory &amp; DXGI video memory stats</div></div><span>${(t.ramUsedGb||0).toFixed(1)}/${(t.ramTotalGb||16).toFixed(1)} GB · ${Math.round(t.vramUsedMb||0)} MB VRAM</span></div>
+      `;
+    } else if (cat.id === 'jailbreak') {
+      pane.innerHTML = `
+        <h2 style="color:#fde047;">⚡ Jailbreak — Xbox RGH / DevKit Override</h2>
+        <div class="sub">Customize Gamertag, Gamerpic (PFP), Game Pass Ultimate spoof, or switch directly back to the PlayStation 5 Emulator.</div>
+        <div class="x-row" style="background:rgba(0,112,209,0.2);padding:14px;border:1px solid #60a5fa;margin-bottom:10px;">
+          <div><div class="lbl" style="color:#bfdbfe;">Switch to PlayStation 5 Emulator</div><div class="desc">Switches into the PS5_Online dashboard (Xbox-to-PS5 port)</div></div>
+          <button class="x-btn ps5" id="xSwitchPs5">Switch to PS5 →</button>
+        </div>
+        <div class="x-row">
+          <div><div class="lbl">Gamertag / Account Name</div><div class="desc">Updates your Xbox profile name live</div></div>
+          <div style="display:flex;gap:8px;">
+            <input class="x-input" id="xJbName" value="${escapeHtml(state.profileName)}" maxlength="24">
+            <button class="x-btn" id="xJbSaveName">Save</button>
+          </div>
+        </div>
+        <div class="x-row">
+          <div><div class="lbl">Xbox Game Pass / Live Tier Spoof</div><div class="desc">Toggle Ultimate / Core badge on your Gamertag</div></div>
+          <select class="x-select" id="xJbGp">
+            <option value="None" ${state.gamePassTier === 'None' ? 'selected' : ''}>None</option>
+            <option value="Core" ${state.gamePassTier === 'Core' ? 'selected' : ''}>Game Pass Core</option>
+            <option value="Ultimate" ${state.gamePassTier === 'Ultimate' ? 'selected' : ''}>Game Pass Ultimate</option>
+          </select>
+        </div>
+        <div class="x-row">
+          <div><div class="lbl">Spoof Gamerscore</div><div class="desc">Customize your ⓖ Gamerscore counter</div></div>
+          <div style="display:flex;gap:8px;">
+            <input class="x-input" type="number" id="xJbGs" value="${state.gamerscore}" style="min-width:120px;">
+            <button class="x-btn" id="xJbSaveGs">Apply</button>
+          </div>
+        </div>
+        <div class="x-row" style="flex-direction:column;align-items:flex-start;">
+          <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+            <div><div class="lbl">Gamerpic (PFP)</div><div class="desc">Pick a classic Gamerpic or upload any custom image from your PC</div></div>
+            <label class="x-btn" style="cursor:pointer;">Upload Custom PFP<input type="file" id="xJbPfpFile" accept="image/*" style="display:none;"></label>
+          </div>
+          <div class="avatar-grid" id="xJbPfpGrid"></div>
+        </div>
+      `;
+      pane.querySelector('#xSwitchPs5').onclick = () => switchToPs5();
+      pane.querySelector('#xJbSaveName').onclick = () => {
+        const v = pane.querySelector('#xJbName').value.trim();
+        if (v) { pushConfig({ profileName: v }); showToast('Gamertag updated to ' + v); }
+      };
+      pane.querySelector('#xJbName').onkeydown = (e) => e.stopPropagation();
+      pane.querySelector('#xJbGp').onchange = (e) => { state.gamePassTier = e.target.value; saveLocalPrefs(); syncChrome(); showToast('Game Pass: ' + state.gamePassTier); };
+      pane.querySelector('#xJbSaveGs').onclick = () => { state.gamerscore = Math.max(0, parseInt(pane.querySelector('#xJbGs').value, 10) || 0); saveLocalPrefs(); syncChrome(); showToast('Gamerscore updated!'); };
+      pane.querySelector('#xJbPfpFile').onchange = (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = () => { state.gamerpic = r.result; saveLocalPrefs(); syncChrome(); renderPicGrid(); showToast('Custom Gamerpic saved!'); };
+        r.readAsDataURL(f);
+      };
+      function renderPicGrid() {
+        const g = pane.querySelector('#xJbPfpGrid');
+        g.innerHTML = '';
+        GAMERPICS.forEach((p) => {
+          const d = document.createElement('div');
+          d.className = 'avatar-opt' + (state.gamerpic === p.svg ? ' selected' : '');
+          d.innerHTML = `<img src="${p.svg}" style="width:100%;height:100%;object-fit:cover;">`;
+          d.onclick = () => { state.gamerpic = p.svg; saveLocalPrefs(); syncChrome(); renderPicGrid(); showToast('Gamerpic: ' + p.label); };
+          g.appendChild(d);
+        });
+      }
+      renderPicGrid();
+    }
+  }
+
+  // ==================== CLASSIC BLADES RENDERER ====================
+  const BLADES = [
+    { cls: 'blade-mkt', title: 'Marketplace' },
+    { cls: 'blade-live', title: 'Xbox Live' },
+    { cls: 'blade-games', title: 'Games' },
+    { cls: 'blade-media', title: 'Media' },
+    { cls: 'blade-sys', title: 'System' }
+  ];
+
+  function renderBlades() {
+    const acc = document.getElementById('bladesAccordion');
+    acc.innerHTML = '';
+    BLADES.forEach((bl, idx) => {
+      const el = document.createElement('div');
+      el.className = 'blade ' + bl.cls + (idx === state.activeBlade ? ' open' : '');
+      const spine = document.createElement('div');
+      spine.className = 'blade-spine';
+      spine.textContent = bl.title;
+      spine.onclick = () => { xboxSfx('blade'); state.activeBlade = idx; renderBlades(); };
+      const body = document.createElement('div');
+      body.className = 'blade-body';
+
+      if (idx === 2) {
+        body.innerHTML = `<h2 style="margin:0 0 14px;color:#15803d;">Games Library (${GAMES.length})</h2>` +
+          GAMES.map((g, gi) => `
+            <div class="blade-item-row" data-gi="${gi}">
+              <img src="${g.thumb}" style="width:58px;height:58px;object-fit:cover;border-radius:4px;">
+              <div style="flex:1;"><strong>${g.name}</strong><div style="font-size:12.5px;color:#475569;">${g.id === state.emulatedGame ? '✅ Mounted & Emulated — Click to Launch' : g.tag}</div></div>
+              <span style="font-weight:700;color:${g.id === state.emulatedGame ? '#16a34a' : '#64748b'};">${g.id === state.emulatedGame ? 'PLAY ▶' : 'LOCKED'}</span>
+            </div>
+          `).join('');
+        body.querySelectorAll('.blade-item-row').forEach(r => {
+          r.onclick = () => launchGame(GAMES[parseInt(r.dataset.gi, 10)]);
+        });
+      } else if (idx === 4) {
+        body.innerHTML = `
+          <h2 style="margin:0 0 14px;color:#334155;">System &amp; Jailbreak</h2>
+          <div class="blade-item-row" id="blToMetro"><strong>Switch to Metro Dashboard</strong><span style="margin-left:auto;color:#16a34a;">OPEN</span></div>
+          <div class="blade-item-row" id="blToJb"><strong>Open Jailbreak Settings (Profile / Game Pass / PS5 Switch)</strong><span style="margin-left:auto;color:#ca8a04;">⚡</span></div>
+          <div class="blade-item-row" id="blToPs5"><strong>Switch Directly to PlayStation 5 Emulator</strong><span style="margin-left:auto;color:#0070d1;">PS5 →</span></div>
+          <div class="blade-item-row" id="blToggleOpt"><strong>Optimization Mode: ${state.optimizationMode ? 'ON' : 'OFF'}</strong><span style="margin-left:auto;">TOGGLE</span></div>
+          <div class="blade-item-row" id="blToggleMb"><strong>Motion Blur: ${state.motionBlur ? 'ON (' + state.motionBlurStrength + '%)' : 'OFF'}</strong><span style="margin-left:auto;">TOGGLE</span></div>
+        `;
+        body.querySelector('#blToMetro').onclick = () => toggleDashStyle();
+        body.querySelector('#blToJb').onclick = () => { state.dashStyle = 'metro'; state.activeTab = 'settings'; state.activeSetCat = 5; syncChrome(); renderMetroTabs(); renderMetroContent(); };
+        body.querySelector('#blToPs5').onclick = () => switchToPs5();
+        body.querySelector('#blToggleOpt').onclick = () => { pushConfig({ optimizationMode: !state.optimizationMode }); renderBlades(); };
+        body.querySelector('#blToggleMb').onclick = () => { pushConfig({ motionBlur: !state.motionBlur }); renderBlades(); };
+      } else if (idx === 1) {
+        body.innerHTML = `
+          <h2 style="margin:0 0 14px;color:#c2410c;">Xbox Live Profile</h2>
+          <div style="display:flex;align-items:center;gap:16px;padding:16px;background:#fff;border-radius:8px;margin-bottom:14px;">
+            <img src="${state.gamerpic}" style="width:74px;height:74px;border:3px solid #16a34a;object-fit:cover;">
+            <div><div style="font-size:22px;font-weight:700;">${escapeHtml(state.profileName)}</div><div style="color:#475569;">ⓖ ${Number(state.gamerscore).toLocaleString()} · Game Pass ${state.gamePassTier}</div></div>
+          </div>
+          <div class="blade-item-row" id="blLivePlay"><strong>Launch Mounted Game (${state.emulatedGame.toUpperCase()})</strong></div>
+        `;
+        body.querySelector('#blLivePlay').onclick = () => launchGame(GAMES.find(g => g.id === state.emulatedGame));
+      } else if (idx === 0) {
+        body.innerHTML = `<h2 style="margin:0 0 14px;color:#7e22ce;">Xbox Live Marketplace</h2>
+          <div class="blade-item-row" id="blMkt6"><strong>Grand Theft Auto VI — Current Development Updates</strong><span style="margin-left:auto;color:#9333ea;">VIEW</span></div>
+          <div class="blade-item-row" id="blMkt5"><strong>Grand Theft Auto V — Mounted &amp; Ready</strong><span style="margin-left:auto;color:#16a34a;">LAUNCH</span></div>`;
+        body.querySelector('#blMkt6').onclick = () => { window.location.href = '/updates/gta6'; };
+        body.querySelector('#blMkt5').onclick = () => launchGame(GAMES[1]);
+      } else {
+        body.innerHTML = `<h2 style="margin:0 0 14px;color:#1d4ed8;">Media Hub</h2>
+          <div class="blade-item-row"><strong>Spotify Music</strong></div>
+          <div class="blade-item-row"><strong>YouTube 4K</strong></div>
+          <div class="blade-item-row"><strong>Netflix</strong></div>`;
+      }
+
+      el.appendChild(spine);
+      el.appendChild(body);
+      acc.appendChild(el);
+    });
+  }
+
+  // ==================== GUIDE & CONSOLE SWITCH ====================
+  function openGuide() {
+    state.guideOpen = true;
+    xboxSfx('ok');
+    const t = state.telemetry;
+    document.getElementById('guideUserSub').textContent =
+      `${state.profileName} · CPU ${(t.cpuPct||0).toFixed(0)}% · GPU ${(t.gpuPct||0).toFixed(0)}% · RAM ${(t.ramUsedGb||0).toFixed(1)} GB`;
+    document.getElementById('xbox-guide').classList.add('open');
+  }
+  function closeGuide() { state.guideOpen = false; document.getElementById('xbox-guide').classList.remove('open'); }
+
+  function toggleDashStyle() {
+    xboxSfx('blade');
+    state.dashStyle = state.dashStyle === 'metro' ? 'blades' : 'metro';
+    saveLocalPrefs();
+    syncChrome();
+    if (state.dashStyle === 'blades') renderBlades();
+    else { renderMetroTabs(); renderMetroContent(); }
+  }
+
+  function replayBoot() {
+    closeGuide();
+    state.bootDone = false;
+    document.getElementById('xbox-boot').classList.remove('hidden');
+    setTimeout(finishBoot, 2000);
+  }
+
+  async function switchToPs5() {
+    xboxSfx('ok');
+    showToast('Switching to PlayStation 5 Emulator (Xbox→PS5 Port)...');
+    try {
+      await fetch('/vbx/api/switch-console', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consoleTarget: 'ps5' })
+      });
+    } catch (e) {}
+    setTimeout(() => { window.location.href = '/ps5/'; }, 320);
+  }
+
+  document.getElementById('btnGuideTop').onclick = openGuide;
+  document.getElementById('btnGuideFooter').onclick = openGuide;
+  document.getElementById('btnBladesGuide').onclick = openGuide;
+  document.getElementById('btnBladesToMetro').onclick = toggleDashStyle;
+  document.getElementById('gCloseGuide').onclick = closeGuide;
+  document.getElementById('gPlayMounted').onclick = () => { closeGuide(); launchGame(GAMES.find(g => g.id === state.emulatedGame)); };
+  document.getElementById('gToggleStyle').onclick = () => { closeGuide(); toggleDashStyle(); };
+  document.getElementById('gOpenJailbreak').onclick = () => {
+    closeGuide(); state.dashStyle = 'metro'; state.activeTab = 'settings'; state.activeSetCat = 5;
+    syncChrome(); renderMetroTabs(); renderMetroContent();
+  };
+  document.getElementById('gSwitchPs5').onclick = () => switchToPs5();
+  document.getElementById('gReplayBoot').onclick = replayBoot;
+
+  // ==================== KEYBOARD + FULL XBOX / DUALSENSE CONTROLLER NAVIGATION ====================
+  window.addEventListener('keydown', (e) => {
+    if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (!state.bootDone) { finishBoot(); return; }
+    if (state.modalOpen) { if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Backspace') closeModal(); return; }
+    if (state.guideOpen) { if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'g' || e.key === 'G') closeGuide(); return; }
+
+    if (e.key === 'g' || e.key === 'G' || e.key === 'y' || e.key === 'Y') { openGuide(); return; }
+    if (state.dashStyle === 'blades') {
+      if (e.key === 'ArrowRight') { xboxSfx('blade'); state.activeBlade = (state.activeBlade + 1) % BLADES.length; renderBlades(); }
+      else if (e.key === 'ArrowLeft') { xboxSfx('blade'); state.activeBlade = (state.activeBlade - 1 + BLADES.length) % BLADES.length; renderBlades(); }
+      return;
+    }
+
+    if (state.activeTab === 'games') {
+      if (e.key === 'ArrowRight') { xboxSfx('nav'); state.selectedGameIdx = (state.selectedGameIdx + 1) % GAMES.length; renderMetroContent(); }
+      else if (e.key === 'ArrowLeft') { xboxSfx('nav'); state.selectedGameIdx = (state.selectedGameIdx - 1 + GAMES.length) % GAMES.length; renderMetroContent(); }
+      else if (e.key === 'Enter' || e.key === ' ') { launchGame(GAMES[state.selectedGameIdx]); }
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      const idx = TABS.indexOf(state.activeTab);
+      const next = (idx + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+      xboxSfx('nav'); state.activeTab = TABS[next]; renderMetroTabs(); renderMetroContent();
+    } else if (e.key === 'Enter' && state.activeTab === 'home') {
+      launchGame(GAMES.find(g => g.id === state.emulatedGame));
+    }
+    if (e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E') {
+      const idx = TABS.indexOf(state.activeTab);
+      const next = (idx + (e.key === 'e' || e.key === 'E' ? 1 : -1) + TABS.length) % TABS.length;
+      xboxSfx('nav'); state.activeTab = TABS[next]; renderMetroTabs(); renderMetroContent();
+    }
+  });
+
+  // Live Gamepad polling (DashX360 controller-first UX!)
+  let padCd = 0;
+  const padPrev = new Array(20).fill(false);
+  function pollGamepad(now) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+    for (let i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { gp = pads[i]; break; }
+    if (gp) {
+      document.getElementById('xboxPadStatus').textContent = 'Controller Connected · Full DashX360 Control Active';
+      const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+      const just = (i) => b(i) && !padPrev[i];
+      const lx = gp.axes[0] || 0;
+
+      if (!state.bootDone) {
+        if (just(0) || just(9) || just(16)) finishBoot();
+      } else if (state.modalOpen) {
+        if (just(0) || just(1)) closeModal();
+      } else if (state.guideOpen) {
+        if (just(1) || just(3) || just(16)) closeGuide();
+      } else {
+        if (just(3) || just(16) || (b(8) && b(9))) openGuide(); // Y / Guide / Back+Start
+        if (state.dashStyle === 'blades') {
+          if (just(5) || ((b(15) || lx > 0.55) && now - padCd > 200)) { padCd = now; xboxSfx('blade'); state.activeBlade = (state.activeBlade + 1) % BLADES.length; renderBlades(); }
+          if (just(4) || ((b(14) || lx < -0.55) && now - padCd > 200)) { padCd = now; xboxSfx('blade'); state.activeBlade = (state.activeBlade - 1 + BLADES.length) % BLADES.length; renderBlades(); }
+        } else {
+          if (just(4)) { const i = (TABS.indexOf(state.activeTab) - 1 + TABS.length) % TABS.length; xboxSfx('nav'); state.activeTab = TABS[i]; renderMetroTabs(); renderMetroContent(); }
+          if (just(5)) { const i = (TABS.indexOf(state.activeTab) + 1) % TABS.length; xboxSfx('nav'); state.activeTab = TABS[i]; renderMetroTabs(); renderMetroContent(); }
+          if (state.activeTab === 'games') {
+            if ((b(15) || lx > 0.55) && now - padCd > 180) { padCd = now; xboxSfx('nav'); state.selectedGameIdx = (state.selectedGameIdx + 1) % GAMES.length; renderMetroContent(); }
+            if ((b(14) || lx < -0.55) && now - padCd > 180) { padCd = now; xboxSfx('nav'); state.selectedGameIdx = (state.selectedGameIdx - 1 + GAMES.length) % GAMES.length; renderMetroContent(); }
+            if (just(0)) launchGame(GAMES[state.selectedGameIdx]);
+          } else if (state.activeTab === 'home' && just(0)) {
+            launchGame(GAMES.find(g => g.id === state.emulatedGame));
+          }
+        }
+      }
+      for (let i = 0; i < Math.min(20, gp.buttons.length); i++) padPrev[i] = b(i);
+    }
+    requestAnimationFrame(pollGamepad);
+  }
+  requestAnimationFrame(pollGamepad);
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  function saveLocalPrefs() {
+    try {
+      localStorage.setItem('vbx_xbox_prefs', JSON.stringify({
+        dashStyle: state.dashStyle,
+        theme: state.theme,
+        gamerpic: state.gamerpic,
+        gamerscore: state.gamerscore,
+        gamePassTier: state.gamePassTier,
+        soundOn: state.soundOn
+      }));
+    } catch (e) {}
+  }
+
+  function loadLocalPrefs() {
+    try {
+      const raw = localStorage.getItem('vbx_xbox_prefs');
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (p.dashStyle) state.dashStyle = p.dashStyle;
+      if (p.theme) state.theme = p.theme;
+      if (p.gamerpic) state.gamerpic = p.gamerpic;
+      if (typeof p.gamerscore === 'number') state.gamerscore = p.gamerscore;
+      if (p.gamePassTier) state.gamePassTier = p.gamePassTier;
+      if (typeof p.soundOn === 'boolean') state.soundOn = p.soundOn;
+    } catch (e) {}
+  }
+
+  async function init() {
+    loadLocalPrefs();
+    try {
+      const r = await fetch('/vbx/api/state', { cache: 'no-store' });
+      if (r.ok) {
+        const s = await r.json();
+        if (s.emulatedGame) state.emulatedGame = s.emulatedGame;
+        if (s.profileName) state.profileName = s.profileName;
+        if (typeof s.optimizationMode === 'boolean') state.optimizationMode = s.optimizationMode;
+        if (typeof s.motionBlur === 'boolean') state.motionBlur = s.motionBlur;
+        if (typeof s.motionBlurStrength === 'number') state.motionBlurStrength = s.motionBlurStrength;
+        if (typeof s.showDebugHud === 'boolean') state.showDebugHud = s.showDebugHud;
+        if (typeof s.enableCheatMenu === 'boolean') state.enableCheatMenu = s.enableCheatMenu;
+        if (s.gta5Url) state.gta5Url = s.gta5Url;
+      }
+    } catch (e) {}
+    state.selectedGameIdx = state.emulatedGame === 'gta6' ? 0 : 1;
+    syncChrome();
+    renderMetroTabs();
+    renderMetroContent();
+    if (state.dashStyle === 'blades') renderBlades();
+  }
+
+  async function pollHw() {
+    try {
+      const r = await fetch('/vbx/api/telemetry', { cache: 'no-store' });
+      if (r.ok) state.telemetry = await r.json();
+    } catch (e) {}
+  }
+
+  init();
+  pollHw();
+  setInterval(pollHw, 2000);
+})();
+</script>
+</body>
+</html>

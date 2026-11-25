@@ -12,7 +12,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <winsock2.h>
 #include <windows.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #endif
@@ -35,12 +37,26 @@ struct EmulatorConfig {
     // 0=Frameless Game Window (--app), 1=Fullscreen App, 2=Default Browser
     int viewportMode = 0;
 
+    // Active console shell: 0 = PlayStation 5 (Xbox->PS5 Port), 1 = Xbox Series X / 360 (DashX360)
+    int consoleTarget = 0;
+
+    // PC Enhancement Suite (live-synced with PS5/Xbox UI + pc_overlay.js)
+    bool showDebugHud       = true;
+    bool enableCheatMenu    = true;
+    bool motionBlur         = false;
+    int  motionBlurStrength = 55;
+    bool optimizationMode   = false;
+
+    // Session & Profile
     bool rememberSession = true;
     std::string savedGamertag;
+    std::string psPlusTier = "Extra";
 
-    // Phase 2 hooks for GTA VI Emulator (Cyberleeks XBSX build)
-    // Leave empty until a GTA VI web runtime or local texture-pack override server is integrated.
-    std::string gta6RuntimeUrl;
+    // Foxxy Developer Mode (only accessible when signed in as "Foxxy")
+    bool devGta6Enabled = false;
+    std::string devGta6ExePath;
+
+    // Phase 2 staging directory
     std::string gta6TexturePackDir = ".\\packs\\gta6_vice";
 };
 
@@ -51,17 +67,23 @@ struct PcHardwareInfo {
     std::string gpuName = "Direct3D 11 Hardware GPU";
 };
 
-inline const char* kPresetNames[] = { "ULTRA", "HIGH", "BALANCED", "LOW", "POTATO" };
-inline const char* kResNames[]    = { "1920 x 1080 (FHD)", "1600 x 900 (HD+)", "1280 x 720 (HD)", "960 x 540 (Perf)" };
-inline const char* kResQuery[]    = { "1920x1080", "1600x900", "1280x720", "960x540" };
-inline const char* kFpsNames[]    = { "Uncapped", "60 FPS", "30 FPS" };
-inline const int   kFpsValues[]   = { 0, 60, 30 };
-inline const char* kShadowNames[] = { "High", "Normal", "Low", "Off (Max FPS)" };
-inline const int   kShadowVals[]  = { 2, 1, 0, -1 };
-inline const char* kGta5Modes[]   = { "TITLE MENU", "STORY MODE", "SANDBOX LS", "VICE TEST MAP" };
+inline const char* kPresetNames[]   = { "ULTRA", "HIGH", "BALANCED", "LOW", "POTATO" };
+inline const char* kResNames[]      = { "1920 x 1080 (FHD)", "1600 x 900 (HD+)", "1280 x 720 (HD)", "960 x 540 (Perf)" };
+inline const char* kResQuery[]      = { "1920x1080", "1600x900", "1280x720", "960x540" };
+inline const char* kFpsNames[]      = { "Uncapped", "60 FPS", "30 FPS" };
+inline const int   kFpsValues[]     = { 0, 60, 30 };
+inline const char* kShadowNames[]   = { "High", "Normal", "Low", "Off (Max FPS)" };
+inline const int   kShadowVals[]    = { 2, 1, 0, -1 };
+inline const char* kGta5Modes[]     = { "TITLE MENU", "STORY MODE", "SANDBOX LS", "VICE TEST MAP" };
 inline const char* kViewportNames[] = { "Frameless Game Window (App Mode)", "Fullscreen Viewport", "System Default Browser" };
+inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)" };
 
-inline std::string BuildGta5LaunchUrl(const EmulatorConfig& cfg) {
+/**
+ * Builds the local-proxy GTA V play path ("/play/?...") so the embedded server
+ * injects pc_overlay.js (Cheat Menu, Real Hardware Debug HUD, Motion Blur,
+ * Optimization Mode, DualSense/Xbox Controller Engine) with exact COOP/COEP headers.
+ */
+inline std::string BuildLocalGta5PlayPath(const EmulatorConfig& cfg) {
     const bool isLowProfile = (cfg.preset >= 3);
     const int fps = kFpsValues[(cfg.fpsIndex >= 0 && cfg.fpsIndex < 3) ? cfg.fpsIndex : 1];
     const int shVal = kShadowVals[(cfg.shadowsIndex >= 0 && cfg.shadowsIndex < 4) ? cfg.shadowsIndex : 1];
@@ -79,7 +101,7 @@ inline std::string BuildGta5LaunchUrl(const EmulatorConfig& cfg) {
     char scaleBuf[16];
     std::snprintf(scaleBuf, sizeof(scaleBuf), "%.2f", scale);
 
-    std::string url = "https://playgta5.com/?low=";
+    std::string url = "/play/?low=";
     url += isLowProfile ? "1" : "0";
     url += "&fps=" + std::to_string(fps);
     url += "&res=" + std::string(resStr);
@@ -95,7 +117,7 @@ inline std::string BuildGta5LaunchUrl(const EmulatorConfig& cfg) {
         url += "&mode=sandbox&map=env_test";
     }
 
-    // Clean, verified RAGE CLI overrides (zero conflicting flags)
+    // Verified RAGE CLI overrides
     std::vector<std::string> args;
     if (isLowProfile) {
         if (shVal >= 0) args.push_back("-shadowQuality=" + std::to_string(shVal));
@@ -107,6 +129,10 @@ inline std::string BuildGta5LaunchUrl(const EmulatorConfig& cfg) {
         args.push_back("-reflectionQuality=" + std::to_string(q));
         args.push_back("-particleQuality=" + std::to_string(q));
         args.push_back("-grassQuality=" + std::to_string(q));
+    }
+    if (cfg.optimizationMode) {
+        args.push_back("-noInGameDOF");
+        args.push_back("-MSAA=0");
     }
 
     if (cfg.renderDistance >= 0) {
@@ -172,6 +198,22 @@ inline bool FileExistsW(const std::wstring& path) {
     return (attr != INVALID_FILE_ATTRIBUTES) && !(attr & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+inline std::string PickExecutableFileDialog(HWND owner) {
+    wchar_t fileBuf[MAX_PATH * 2] = {};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"Windows Executables (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = fileBuf;
+    ofn.nMaxFile = static_cast<DWORD>(sizeof(fileBuf) / sizeof(wchar_t));
+    ofn.lpstrTitle = L"Select Custom GTA VI Developer Executable (.exe)";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&ofn)) {
+        return WideToUtf8(std::wstring(fileBuf));
+    }
+    return {};
+}
+
 inline std::wstring FindChromiumAppBrowser() {
     wchar_t progFiles[MAX_PATH] = {};
     wchar_t progFiles86[MAX_PATH] = {};
@@ -181,8 +223,6 @@ inline std::wstring FindChromiumAppBrowser() {
     GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH);
 
     std::vector<std::wstring> candidates;
-    // Prefer Edge (preinstalled on every Windows 10/11 PC with native WebGPU + SharedArrayBuffer),
-    // then Chrome, then Brave!
     if (progFiles86[0]) candidates.push_back(std::wstring(progFiles86) + L"\\Microsoft\\Edge\\Application\\msedge.exe");
     if (progFiles[0])   candidates.push_back(std::wstring(progFiles)   + L"\\Microsoft\\Edge\\Application\\msedge.exe");
     if (progFiles[0])   candidates.push_back(std::wstring(progFiles)   + L"\\Google\\Chrome\\Application\\chrome.exe");
@@ -198,16 +238,19 @@ inline std::wstring FindChromiumAppBrowser() {
 }
 
 /**
- * Launches the GTA V runtime inside a clean frameless PC game window (--app mode)
- * with zero browser tabs/bars and full desktop WebGPU + SharedArrayBuffer + mouse Pointer Lock.
- * Returns a short status description of which viewport backend launched.
+ * Launches the PS5 / Xbox Emulator Dashboard or GTA VI Updates page inside a clean
+ * frameless WebGPU game viewport (--app mode) with autoplay audio enabled and high-perf GPU.
  */
-inline std::string LaunchGameViewport(const std::string& url, int viewportMode) {
+inline std::string LaunchGameViewport(const std::string& url, int viewportMode, bool highPerfGpu = false) {
     std::wstring wUrl = Utf8ToWide(url);
     if (viewportMode != 2) {
         std::wstring browser = FindChromiumAppBrowser();
         if (!browser.empty()) {
-            std::wstring cmd = L"\"" + browser + L"\" --app=\"" + wUrl + L"\"";
+            std::wstring cmd = L"\"" + browser + L"\" --app=\"" + wUrl + L"\""
+                               L" --autoplay-policy=no-user-gesture-required";
+            if (highPerfGpu) {
+                cmd += L" --force-high-performance-gpu --enable-unsafe-webgpu";
+            }
             if (viewportMode == 1) {
                 cmd += L" --start-fullscreen";
             } else {
@@ -254,6 +297,15 @@ inline void SaveConfig(const EmulatorConfig& cfg) {
     f << "renderDistance=" << cfg.renderDistance << "\n";
     f << "gta5Mode=" << cfg.gta5Mode << "\n";
     f << "viewportMode=" << cfg.viewportMode << "\n";
+    f << "consoleTarget=" << cfg.consoleTarget << "\n";
+    f << "showDebugHud=" << (cfg.showDebugHud ? 1 : 0) << "\n";
+    f << "enableCheatMenu=" << (cfg.enableCheatMenu ? 1 : 0) << "\n";
+    f << "motionBlur=" << (cfg.motionBlur ? 1 : 0) << "\n";
+    f << "motionBlurStrength=" << cfg.motionBlurStrength << "\n";
+    f << "optimizationMode=" << (cfg.optimizationMode ? 1 : 0) << "\n";
+    f << "psPlusTier=" << cfg.psPlusTier << "\n";
+    f << "devGta6Enabled=" << (cfg.devGta6Enabled ? 1 : 0) << "\n";
+    f << "devGta6ExePath=" << cfg.devGta6ExePath << "\n";
     f << "rememberSession=" << (cfg.rememberSession ? 1 : 0) << "\n";
     if (cfg.rememberSession && !cfg.savedGamertag.empty()) {
         f << "gamertag=" << cfg.savedGamertag << "\n";
@@ -270,6 +322,7 @@ inline void LoadConfig(EmulatorConfig& cfg) {
         if (eq == std::string::npos) continue;
         std::string k = line.substr(0, eq);
         std::string v = line.substr(eq + 1);
+        if (!v.empty() && v.back() == '\r') v.pop_back();
         try {
             if (k == "preset") cfg.preset = std::stoi(v);
             else if (k == "resIndex") cfg.resIndex = std::stoi(v);
@@ -278,13 +331,22 @@ inline void LoadConfig(EmulatorConfig& cfg) {
             else if (k == "renderDistance") cfg.renderDistance = std::stoi(v);
             else if (k == "gta5Mode") cfg.gta5Mode = std::stoi(v);
             else if (k == "viewportMode") cfg.viewportMode = std::stoi(v);
+            else if (k == "consoleTarget") cfg.consoleTarget = std::stoi(v);
+            else if (k == "showDebugHud") cfg.showDebugHud = (std::stoi(v) != 0);
+            else if (k == "enableCheatMenu") cfg.enableCheatMenu = (std::stoi(v) != 0);
+            else if (k == "motionBlur") cfg.motionBlur = (std::stoi(v) != 0);
+            else if (k == "motionBlurStrength") cfg.motionBlurStrength = std::stoi(v);
+            else if (k == "optimizationMode") cfg.optimizationMode = (std::stoi(v) != 0);
+            else if (k == "psPlusTier") cfg.psPlusTier = v;
+            else if (k == "devGta6Enabled") cfg.devGta6Enabled = (std::stoi(v) != 0);
+            else if (k == "devGta6ExePath") cfg.devGta6ExePath = v;
             else if (k == "rememberSession") cfg.rememberSession = (std::stoi(v) != 0);
             else if (k == "gamertag") cfg.savedGamertag = v;
         } catch (...) {}
     }
 }
 #else
-inline std::string LaunchGameViewport(const std::string&, int) { return "Preview Stub"; }
+inline std::string LaunchGameViewport(const std::string&, int, bool = false) { return "Preview Stub"; }
 inline void SaveConfig(const EmulatorConfig&) {}
 inline void LoadConfig(EmulatorConfig&) {}
 #endif
