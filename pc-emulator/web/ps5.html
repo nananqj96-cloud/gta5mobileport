@@ -1406,8 +1406,17 @@
     plus.title = 'PlayStation Plus ' + appState.psPlusTier;
 
     const badge = document.getElementById('ps5PortBadge');
-    const mountedLabel = appState.emulatedGame === 'gta6' ? 'GTA VI (DEV)' : 'GTA V MOUNTED';
+    const mountedLabel = appState.emulatedGame === 'all'
+      ? '⚠ ALL MODE (GTA V + VI · MIGHT BE BUGGY)'
+      : (appState.emulatedGame === 'gta6' ? 'GTA VI (DEV)' : 'GTA V MOUNTED');
     badge.textContent = 'XBOX→PS5 PORT · ' + mountedLabel;
+    badge.style.color = appState.emulatedGame === 'all' ? '#fde68a' : '';
+    badge.style.borderColor = appState.emulatedGame === 'all' ? '#f59e0b' : '';
+  }
+
+  function isGameMounted(gameId) {
+    if (appState.emulatedGame === 'all') return gameId === 'gta5' || gameId === 'gta6';
+    return gameId === appState.emulatedGame;
   }
 
   function updateClock() {
@@ -1433,7 +1442,7 @@
     list.forEach((item, idx) => {
       const wrap = document.createElement('div');
       wrap.className = 'ps_games_item_container' + (idx === appState.selectedIdx ? ' active' : '');
-      const isEmulated = (appState.activeSection === 'games') && (item.id === appState.emulatedGame);
+      const isEmulated = (appState.activeSection === 'games') && isGameMounted(item.id);
 
       if (appState.activeSection === 'games') {
         wrap.innerHTML = `
@@ -1547,7 +1556,7 @@
       const cards = GAMES.slice(0, 8).map(g =>
         `<div style="display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.06);margin-bottom:8px;">
           <img src="${g.thumb}" style="width:52px;height:52px;border-radius:8px;object-fit:cover;">
-          <div style="flex:1;"><strong>${g.name}</strong><div style="font-size:12px;color:#94a3b8;">${g.platform} · ${g.id === appState.emulatedGame ? 'Mounted & Ready' : 'Not Emulated'}</div></div>
+          <div style="flex:1;"><strong>${g.name}</strong><div style="font-size:12px;color:#94a3b8;">${g.platform} · ${isGameMounted(g.id) ? 'Mounted & Ready' : 'Not Emulated'}</div></div>
         </div>`
       ).join('');
       openModal('PlayStation Store', `<div style="max-height:340px;overflow-y:auto;">${cards}</div>`, [
@@ -1557,7 +1566,7 @@
     }
 
     // STRICT EMULATION SELECTION ENFORCEMENT!
-    if (item.id !== appState.emulatedGame) {
+    if (!isGameMounted(item.id)) {
       playPs5Sfx('error');
       const msg = (item.id === 'gta6')
         ? 'you did not emulate gta 6. gta 6 doesnt exist in this ps5 emulator.'
@@ -1578,36 +1587,48 @@
     // Launching Emulated GTA V -> Launch via local proxy with full PC Overlay!
     if (item.id === 'gta5') {
       playPs5Sfx('confirm');
-      showToast('Launching Grand Theft Auto V (Xbox→PS5 Port)...', '#0070d1');
+      showToast(appState.emulatedGame === 'all' ? '⚠ ALL MODE: Launching Grand Theft Auto V...' : 'Launching Grand Theft Auto V (Xbox→PS5 Port)...', '#0070d1');
       const target = buildPlayUrl();
       setTimeout(() => { window.location.href = target; }, 380);
       return;
     }
 
-    // Launching Emulated GTA VI (Foxxy Developer Mode Override!)
+    // Launching Emulated GTA VI (Foxxy Dev Target OR ALL Mode Simultaneous Preview!)
     if (item.id === 'gta6') {
       playPs5Sfx('confirm');
-      showToast('Launching GTA VI Developer Target...', '#ff3394');
-      try {
-        const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
-        const d = await res.json();
-        if (d.ok) {
-          const devExtra = d.isExe
-            ? `<p style="font-size:13px;color:#38bdf8;margin-top:8px;">Full-Screen Dev Overlay: <b>${d.devOverlay ? 'ACTIVE (F10 toggles)' : 'OFF'}</b> &nbsp;·&nbsp; Fake FPS Cap: <b>${d.fakeFps ? (d.fakeFpsLimit + ' FPS MAX') : 'OFF'}</b></p>`
-            : '';
-          openModal('Grand Theft Auto VI — Launched', `<p>Opened custom file:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p>${devExtra}<p style="font-size:13px;color:#94a3b8;">Launched directly from PS5 Dashboard.</p>`, [
-            { label: 'Continue', primary: true, fn: closeModal }
-          ]);
-        } else {
-          openModal('GTA VI Developer Target Error', `<p>${d.error || 'Select any custom file in Foxxy Developer Settings first.'}</p>`, [
-            { label: 'OK', primary: true, fn: closeModal }
-          ]);
-        }
-      } catch (e) {
-        openModal('Launch Bridge Error', '<p>Could not reach local ViceBox X hypervisor bridge.</p>', [
-          { label: 'OK', primary: true, fn: closeModal }
-        ]);
+      const hasCustom = appState.isFoxxyDev && appState.devGta6Enabled && !!appState.devGta6ExePath;
+      if (hasCustom) {
+        showToast('Launching GTA VI Developer Target...', '#ff3394');
+        try {
+          const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
+          const d = await res.json();
+          if (d.ok) {
+            const devExtra = d.isExe
+              ? `<p style="font-size:13px;color:#38bdf8;margin-top:8px;">Full-Screen Dev Overlay: <b>${d.devOverlay ? 'ACTIVE (F10 toggles)' : 'OFF'}</b> &nbsp;·&nbsp; Fake FPS Cap: <b>${d.fakeFps ? (d.fakeFpsLimit + ' FPS MAX') : 'OFF'}</b></p>`
+              : '';
+            const allExtra = appState.emulatedGame === 'all'
+              ? '<p style="font-size:13px;color:#fde68a;"><b>⚠ ALL Mode (Might Be Buggy):</b> You can also launch Grand Theft Auto V right now to run both simultaneously!</p>'
+              : '';
+            const acts = appState.emulatedGame === 'all'
+              ? [
+                  { label: 'Launch GTA V Too', primary: true, fn: () => { closeModal(); window.location.href = buildPlayUrl(); } },
+                  { label: 'Continue', primary: false, fn: closeModal }
+                ]
+              : [{ label: 'Continue', primary: true, fn: closeModal }];
+            openModal('Grand Theft Auto VI — Launched', `<p>Opened custom file:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p>${devExtra}${allExtra}<p style="font-size:13px;color:#94a3b8;">Launched directly from PS5 Dashboard.</p>`, acts);
+            return;
+          }
+        } catch (e) {}
       }
+      if (appState.emulatedGame === 'all') {
+        showToast('⚠ ALL MODE (Might Be Buggy): Launching GTA VI Vice Test Sandbox...', '#f59e0b');
+        const target = buildPlayUrl() + '&mode=sandbox&map=env_test&vbx_title=gta6';
+        setTimeout(() => { window.location.href = target; }, 380);
+        return;
+      }
+      openModal('GTA VI Developer Target Error', '<p>Select any custom file in Foxxy Developer Settings first, or enable ALL Mode in Jailbreak Settings.</p>', [
+        { label: 'OK', primary: true, fn: closeModal }
+      ]);
     }
   }
 
@@ -1621,7 +1642,8 @@
       + '&vbx_mblur=' + (appState.motionBlur ? '1' : '0')
       + '&vbx_mblur_str=' + appState.motionBlurStrength
       + '&vbx_opt=' + (appState.optimizationMode ? '1' : '0')
-      + '&vbx_sens=' + appState.lookSensitivity;
+      + '&vbx_sens=' + appState.lookSensitivity
+      + '&vbx_mode=' + encodeURIComponent(appState.emulatedGame);
   }
 
   // ==================== OFFICIAL PS5 SETTINGS CATEGORIES (14 WORKING TABS INCLUDING JAILBREAK!) ====================
@@ -2098,12 +2120,26 @@
       pane.innerHTML = `
         <h2 style="color:#f8d454;">⚡ Jailbreak — ViceBox CFW Settings</h2>
         <div class="sub">Custom PlayStation 5 CFW tools: unlock PlayStation Plus badge, customize Account Name &amp; PFP, tweak emulator overrides, or switch directly to the Xbox DashX360 Emulator.</div>
-        <div class="ps5-opt-row" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.35);border-radius:10px;margin-bottom:14px;">
+        <div class="ps5-opt-row" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.35);border-radius:10px;margin-bottom:10px;">
           <div>
-            <div class="lbl" style="color:#6ee7b7;font-weight:600;">Switch to Xbox Emulator (DashX360)</div>
-            <div class="desc">Switches from Xbox-to-PS5 port straight into the native Xbox Metro / Blades dashboard</div>
+            <div class="lbl" style="color:#6ee7b7;font-weight:600;">Switch Console OS (Xbox / ViceOS Neo)</div>
+            <div class="desc">Jump straight into Xbox DashX360 or our custom ViceOS Neo console dashboard</div>
           </div>
-          <button class="ps5-ctrl-btn xbox" id="btnSwitchXbox">Switch to Xbox →</button>
+          <div style="display:flex;gap:8px;">
+            <button class="ps5-ctrl-btn xbox" id="btnSwitchXbox">Xbox →</button>
+            <button class="ps5-ctrl-btn primary" id="btnSwitchViceOs">ViceOS Neo →</button>
+          </div>
+        </div>
+        <div class="ps5-opt-row" style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.45);border-radius:10px;margin-bottom:14px;">
+          <div>
+            <div class="lbl" style="color:#fde68a;font-weight:600;">Emulation Mode (GTA V / GTA VI / ⚠ ALL Mode)</div>
+            <div class="desc">ALL Mode mounts BOTH GTA V and GTA VI at the same time (Experimental — might be buggy!)</div>
+          </div>
+          <select class="ps5-select" id="jbEmuMode">
+            <option value="gta5" ${appState.emulatedGame === 'gta5' ? 'selected' : ''}>GTA V Only</option>
+            <option value="gta6" ${appState.emulatedGame === 'gta6' ? 'selected' : ''}>GTA VI (Dev)</option>
+            <option value="all"  ${appState.emulatedGame === 'all'  ? 'selected' : ''}>⚠ ALL Mode (GTA V + VI · Buggy)</option>
+          </select>
         </div>
         <div class="ps5-opt-row">
           <div><div class="lbl">PlayStation Plus Spoof / Toggle</div><div class="desc">Enable or disable the golden PlayStation Plus badge live across the PS5 UI</div></div>
@@ -2136,6 +2172,13 @@
       pane.querySelector('#jb-opt').onchange = (e) => pushConfig({ optimizationMode: e.target.checked });
       pane.querySelector('#jb-mb').onchange = (e) => pushConfig({ motionBlur: e.target.checked });
       pane.querySelector('#jb-hud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
+      pane.querySelector('#jbEmuMode').onchange = (e) => {
+        const m = e.target.value;
+        pushConfig({ emulatedGame: m });
+        syncProfileHeader();
+        renderTrack();
+        showToast(m === 'all' ? '⚠ ALL MODE active (GTA V + GTA VI) — Might be buggy!' : ('Mounted ' + m.toUpperCase()), m === 'all' ? '#f59e0b' : '#19db7a');
+      };
       pane.querySelector('#btnSwitchXbox').onclick = async () => {
         playPs5Sfx('confirm');
         showToast('Switching to Xbox Series X / DashX360 Emulator...', '#19db7a');
@@ -2147,6 +2190,18 @@
           });
         } catch (e) {}
         setTimeout(() => { window.location.href = '/xbox/'; }, 320);
+      };
+      pane.querySelector('#btnSwitchViceOs').onclick = async () => {
+        playPs5Sfx('confirm');
+        showToast('Switching to ViceOS Neo Custom Console Emulator...', '#00e5ff');
+        try {
+          await fetch('/vbx/api/switch-console', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ consoleTarget: 'viceos' })
+          });
+        } catch (e) {}
+        setTimeout(() => { window.location.href = '/viceos/'; }, 320);
       };
     }
   }
@@ -2234,7 +2289,7 @@
     const item = getActiveList()[appState.selectedIdx];
     if (!item) return;
     playPs5Sfx('confirm');
-    const isEm = item.id === appState.emulatedGame;
+    const isEm = isGameMounted(item.id);
     openModal(item.name + ' — Options', `
       <p>${item.desc}</p>
       <div style="font-size:13.5px;color:#cbd5e1;line-height:1.75;background:rgba(0,0,0,0.35);padding:12px 14px;border-radius:8px;">

@@ -252,8 +252,10 @@ struct AppState {
     float btnLoginHover = 0.0f;
     float btnLaunch5Hover = 0.0f;
     float btnGta6Hover = 0.0f;
+    float btnAllModeHover = 0.0f;
     float btnDevBrowseHover = 0.0f;
     float btnDevLaunchHover = 0.0f;
+    float btnDevAllHover = 0.0f;
     float gta6ShakeT = 0.0f;
     float hdrBtnHover[4] = {};
 
@@ -299,7 +301,7 @@ struct AppState {
 
     void SyncToShared(SharedEmulatorState& s, std::mutex& mu, const char* forceEmulatedGame = nullptr) const {
         std::lock_guard<std::mutex> lk(mu);
-        s.consoleTarget      = (config.consoleTarget == 1) ? "xbox" : "ps5";
+        s.consoleTarget      = (config.consoleTarget == 2) ? "viceos" : ((config.consoleTarget == 1) ? "xbox" : "ps5");
         if (forceEmulatedGame) s.emulatedGame = forceEmulatedGame;
         if (!signedInUser.empty()) s.profileName = signedInUser;
         s.psPlusTier         = config.psPlusTier;
@@ -327,7 +329,7 @@ struct AppState {
             if (s.configDirtyFromWeb) {
                 s.configDirtyFromWeb = false;
                 dirty = true;
-                config.consoleTarget      = (s.consoleTarget == "xbox") ? 1 : 0;
+                config.consoleTarget      = (s.consoleTarget == "viceos") ? 2 : ((s.consoleTarget == "xbox") ? 1 : 0);
                 config.psPlusTier         = s.psPlusTier;
                 config.showDebugHud       = s.showDebugHud;
                 config.enableCheatMenu    = s.enableCheatMenu;
@@ -442,6 +444,24 @@ static const ImVec4 kPs5Blue   = ImVec4(0.14f, 0.52f, 0.98f, 1.0f);
 static const ImVec4 kDevGold   = ImVec4(0.98f, 0.78f, 0.18f, 1.0f);
 static const ImVec4 kDevGoldDk = ImVec4(0.68f, 0.44f, 0.06f, 1.0f);
 
+static ImVec4 GetConsoleAccent(int target) {
+    if (target == 2) return ImVec4(0.00f, 0.90f, 1.00f, 1.0f); // ViceOS Neo Cyan/Magenta
+    if (target == 1) return Palette::Emerald;
+    return kPs5Blue;
+}
+
+static const char* GetConsoleRoute(int target) {
+    if (target == 2) return "/viceos/";
+    if (target == 1) return "/xbox/";
+    return "/ps5/";
+}
+
+static const char* GetConsoleTag(int target) {
+    if (target == 2) return "VICEOS NEO";
+    if (target == 1) return "XBOX";
+    return "PS5";
+}
+
 // ==================== TOP FRAMELESS GLASS HEADER ====================
 static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sfx,
                             ParticleSystem& particles, SharedEmulatorState& shared, std::mutex& sharedMu,
@@ -452,7 +472,7 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     dl->AddRectFilled(p0, p1, IM_COL32(7, 10, 18, 226));
     dl->AddLine(ImVec2(0, p1.y - 1.0f), ImVec2(winW, p1.y - 1.0f), IM_COL32(255, 255, 255, 20), 1.0f);
 
-    ImVec4 topAccentL = (app.config.consoleTarget == 0) ? kPs5Blue : Palette::Emerald;
+    ImVec4 topAccentL = GetConsoleAccent(app.config.consoleTarget);
     dl->AddRectFilledMultiColor(
         ImVec2(0, 0), ImVec2(winW, 2.0f),
         ColAlpha(topAccentL, 0.90f), ColAlpha(Palette::Cyan, 0.88f),
@@ -465,7 +485,7 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                "PS5 & XBOX EMULATOR  //  v2.1");
+                "PS5 · XBOX · VICEOS  //  v2.4");
     ImGui::PopFont();
 
     // Center Navigation Tabs (compact widths so DEVELOPER NEVER overlaps on any screen!)
@@ -496,7 +516,7 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         app.tabPillX = ExpLerp(app.tabPillX, targetX, 15.0f, dt);
         app.tabPillW = ExpLerp(app.tabPillW, targetW, 15.0f, dt);
 
-        ImVec4 pillCol = (app.activeTab == 3) ? kDevGold : ((app.config.consoleTarget == 0) ? kPs5Blue : Palette::Emerald);
+        ImVec4 pillCol = (app.activeTab == 3) ? kDevGold : GetConsoleAccent(app.config.consoleTarget);
         dl->AddRectFilled(
             ImVec2(app.tabPillX, 12.0f), ImVec2(app.tabPillX + app.tabPillW, 42.0f),
             ColAlpha(ImVec4(pillCol.x, pillCol.y, pillCol.z, 0.18f), app.dashFade), 8.0f);
@@ -841,12 +861,17 @@ static void TriggerConsoleLaunch(AppState& app, LocalHttpServer& server,
         app.launchAccent = Palette::VicePink;
     } else {
         app.SyncToShared(shared, sharedMu, emulatedGame);
-        bool isPs5 = (app.config.consoleTarget == 0);
-        app.launchTargetUrl = server.BaseUrl() + (isPs5 ? "/ps5/" : "/xbox/");
-        app.launchBannerTitle = isPs5 ? "BOOTING PLAYSTATION 5 EMULATOR" : "BOOTING XBOX DASHX360 EMULATOR";
-        app.launchSubtitle = std::string(isPs5 ? "Xbox-to-PS5 Port · Mounting " : "Xbox Series X Native · Mounting ")
-                           + (std::strcmp(emulatedGame, "gta6") == 0 ? "GTA VI (Foxxy Dev)" : "Grand Theft Auto V");
-        app.launchAccent = isPs5 ? kPs5Blue : Palette::Emerald;
+        int ct = std::max(0, std::min(2, app.config.consoleTarget));
+        app.launchTargetUrl = server.BaseUrl() + GetConsoleRoute(ct);
+        app.launchBannerTitle = (ct == 2) ? "BOOTING VICEOS NEO CUSTOM EMULATOR"
+                              : (ct == 1 ? "BOOTING XBOX DASHX360 EMULATOR" : "BOOTING PLAYSTATION 5 EMULATOR");
+        std::string mountName = (std::strcmp(emulatedGame, "all") == 0)
+                              ? "ALL MODE (GTA V + GTA VI · Experimental)"
+                              : (std::strcmp(emulatedGame, "gta6") == 0 ? "GTA VI (Foxxy Dev)" : "Grand Theft Auto V");
+        std::string shellPrefix = (ct == 2) ? "ViceOS Neo Custom OS · Mounting "
+                                : (ct == 1 ? "Xbox Series X Native · Mounting " : "Xbox-to-PS5 Port · Mounting ");
+        app.launchSubtitle = shellPrefix + mountName;
+        app.launchAccent = (std::strcmp(emulatedGame, "all") == 0) ? kDevGold : GetConsoleAccent(ct);
     }
 
     app.launching = true;
@@ -866,47 +891,50 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float marginX = std::max(32.0f, (winW - 1060.0f) * 0.5f);
     const float contentW = winW - marginX * 2.0f;
-    const float topY = static_cast<float>(kHeaderHeight) + 20.0f + (1.0f - alpha) * 14.0f;
+    const float topY = static_cast<float>(kHeaderHeight) + 14.0f + (1.0f - alpha) * 14.0f;
+    const int ct = std::max(0, std::min(2, app.config.consoleTarget));
+    const ImVec4 activeConCol = GetConsoleAccent(ct);
 
-    // Top Hero Row + Console Target Switcher (PS5 vs Xbox!)
+    // Top Hero Row + 3-Way Console Target Switcher (PS5 | XBOX | VICEOS NEO)
     ImGui::PushFont(fonts.mono);
-    dl->AddText(ImVec2(marginX, topY),
-                ColAlpha(app.config.consoleTarget == 0 ? kPs5Blue : Palette::Emerald, 0.95f * alpha),
-                app.config.consoleTarget == 0
-                    ? "ACTIVE CONSOLE: PLAYSTATION 5 (XBOX-TO-PS5 PORT)  ·  PS5_ONLINE + SETTINGS + JAILBREAK"
-                    : "ACTIVE CONSOLE: XBOX SERIES X / 360 (NATIVE)  ·  DASHX360 METRO + BLADES + JAILBREAK");
+    const char* activeBanner = (ct == 2)
+        ? "ACTIVE CONSOLE: VICEOS NEO (CUSTOM OS)  ·  NEO-GLASS + QUICK DECK + DUAL-LAUNCH"
+        : (ct == 1
+            ? "ACTIVE CONSOLE: XBOX SERIES X / 360 (NATIVE)  ·  DASHX360 METRO + BLADES + JAILBREAK"
+            : "ACTIVE CONSOLE: PLAYSTATION 5 (XBOX-TO-PS5 PORT)  ·  PS5_ONLINE + SETTINGS + JAILBREAK");
+    dl->AddText(ImVec2(marginX, topY), ColAlpha(activeConCol, 0.95f * alpha), activeBanner);
     ImGui::PopFont();
 
     ImGui::PushFont(fonts.title);
-    dl->AddText(ImVec2(marginX, topY + 18.0f), ColAlpha(Palette::TextHi, alpha), "Select Game & Console Target");
+    dl->AddText(ImVec2(marginX, topY + 17.0f), ColAlpha(Palette::TextHi, alpha), "Select Mode & Console Target");
     ImGui::PopFont();
 
-    // Right-aligned Console Switcher Pills (PS5 | XBOX)
+    // Right-aligned 3-Way Console Switcher Pills (PS5 | XBOX | VICEOS NEO)
     {
-        const float swW = 356.0f;
+        const float swW = 456.0f;
         const float swH = 34.0f;
-        ImVec2 sw0(winW - marginX - swW, topY + 18.0f);
+        ImVec2 sw0(winW - marginX - swW, topY + 17.0f);
         dl->AddRectFilled(sw0, ImVec2(sw0.x + swW, sw0.y + swH),
                           ColAlpha(ImVec4(0.04f, 0.06f, 0.11f, 0.92f), alpha), 10.0f);
         dl->AddRect(sw0, ImVec2(sw0.x + swW, sw0.y + swH),
                     ColAlpha(ImVec4(1, 1, 1, 0.12f), alpha), 10.0f);
 
-        const char* cLabels[2] = { "PS5  (Xbox->PS5 Port)", "XBOX  (DashX360)" };
-        const ImVec4 cCols[2] = { kPs5Blue, Palette::Emerald };
-        const float halfW = (swW - 6.0f) * 0.5f;
+        const char* cLabels[3] = { "PS5  (Port)", "XBOX  (Dash360)", "VICEOS NEO" };
+        const ImVec4 cCols[3] = { kPs5Blue, Palette::Emerald, ImVec4(0.00f, 0.90f, 1.00f, 1.0f) };
+        const float segW = (swW - 8.0f) / 3.0f;
         ImGui::PushFont(fonts.bold);
-        for (int c = 0; c < 2; ++c) {
-            ImVec2 bp(sw0.x + 3.0f + c * halfW, sw0.y + 3.0f);
+        for (int c = 0; c < 3; ++c) {
+            ImVec2 bp(sw0.x + 4.0f + c * segW, sw0.y + 3.0f);
             ImGui::SetCursorPos(bp);
             char cid[24];
             std::snprintf(cid, sizeof(cid), "##console_sel_%d", c);
-            if (!app.launching && ImGui::InvisibleButton(cid, ImVec2(halfW, swH - 6.0f))) {
+            if (!app.launching && ImGui::InvisibleButton(cid, ImVec2(segW, swH - 6.0f))) {
                 if (app.config.consoleTarget != c) {
                     app.config.consoleTarget = c;
                     SaveConfig(app.config);
                     app.SyncToShared(shared, sharedMu);
                     sfx.Play(SfxId::TabSwitch, 0.85f);
-                    particles.EmitBurst(ImVec2(bp.x + halfW * 0.5f, bp.y + 14.0f), 14, cCols[c], Palette::Cyan);
+                    particles.EmitBurst(ImVec2(bp.x + segW * 0.5f, bp.y + 14.0f), 14, cCols[c], Palette::VicePink);
                     app.PushLog(std::string("[CONSOLE] Switched target to ") + kConsoleNames[c]);
                 }
             }
@@ -914,29 +942,30 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
             bool hov = ImGui::IsItemHovered();
             bool foc = ImGui::IsItemFocused();
             if (sel || hov || foc) {
-                dl->AddRectFilled(bp, ImVec2(bp.x + halfW, bp.y + swH - 6.0f),
+                dl->AddRectFilled(bp, ImVec2(bp.x + segW, bp.y + swH - 6.0f),
                                   ColAlpha(ImVec4(cCols[c].x, cCols[c].y, cCols[c].z, sel ? 0.30f : 0.14f), alpha), 7.0f);
                 if (sel || foc) {
-                    dl->AddRect(bp, ImVec2(bp.x + halfW, bp.y + swH - 6.0f),
+                    dl->AddRect(bp, ImVec2(bp.x + segW, bp.y + swH - 6.0f),
                                 ColAlpha(foc ? Palette::Cyan : cCols[c], 0.90f * alpha), 7.0f, 0, foc ? 2.0f : 1.3f);
                 }
             }
             ImVec2 ts = ImGui::CalcTextSize(cLabels[c]);
-            dl->AddText(ImVec2(bp.x + (halfW - ts.x) * 0.5f, bp.y + (swH - 6.0f - ts.y) * 0.5f),
+            dl->AddText(ImVec2(bp.x + (segW - ts.x) * 0.5f, bp.y + (swH - 6.0f - ts.y) * 0.5f),
                         ColAlpha(sel ? Palette::TextHi : Palette::TextMid, alpha), cLabels[c]);
         }
         ImGui::PopFont();
     }
 
-    const float gap = 24.0f;
+    const float gap = 22.0f;
     const float cardW = (contentW - gap) * 0.5f;
-    const float cardsTop = topY + 66.0f;
-    const float statusBarH = 50.0f;
-    const float cardH = std::max(384.0f, winH - cardsTop - statusBarH - 24.0f);
-    const bool isPs5 = (app.config.consoleTarget == 0);
+    const float cardsTop = topY + 60.0f;
+    const float statusBarH = 44.0f;
+    const float allBarH = 68.0f;
+    const float allBarY = winH - statusBarH - 12.0f - 10.0f - allBarH;
+    const float cardH = std::max(336.0f, allBarY - cardsTop - 12.0f);
 
     // ------------------------------------------------------------------
-    // CARD 1: GTA V EMULATOR (FULL PS5 / XBOX CONSOLE + PC ENHANCEMENTS)
+    // CARD 1: GTA V EMULATOR (PS5 / XBOX / VICEOS NEO + PC ENHANCEMENTS)
     // ------------------------------------------------------------------
     {
         float lift = app.card5Hover * 4.5f;
@@ -947,32 +976,34 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         bool inCard5 = !app.launching && mp.x >= cMin.x && mp.x <= cMax.x && mp.y >= cardsTop - 6.0f && mp.y <= cardsTop + cardH;
         app.card5Hover = ExpLerp(app.card5Hover, inCard5 ? 1.0f : 0.0f, 11.0f, dt);
 
-        ImVec4 c5Accent = isPs5 ? kPs5Blue : Palette::Emerald;
+        ImVec4 c5Accent = activeConCol;
         DrawGlassCard(dl, cMin, cMax, 16.0f, c5Accent, app.card5Hover, alpha, false);
 
-        float bannerH = std::min(162.0f, cardH * 0.36f);
+        float bannerH = std::min(134.0f, cardH * 0.32f);
         ImVec2 bMin(cMin.x + 1.0f, cMin.y + 1.0f);
         ImVec2 bMax(cMax.x - 1.0f, cMin.y + bannerH);
         DrawGta5BannerArt(dl, bMin, bMax, time, app.card5Hover, alpha);
 
-        DrawStatusPill(dl, ImVec2(cMin.x + 18.0f, cMin.y + 16.0f),
-                       isPs5 ? "READY · PS5 PORT" : "READY · XBOX NATIVE", c5Accent, alpha, true);
+        const char* pill5 = (ct == 2) ? "READY · VICEOS NEO" : (ct == 1 ? "READY · XBOX NATIVE" : "READY · PS5 PORT");
+        DrawStatusPill(dl, ImVec2(cMin.x + 18.0f, cMin.y + 14.0f), pill5, c5Accent, alpha, true);
         ImGui::PushFont(fonts.mono);
-        const char* tag5 = isPs5 ? "PS5_ONLINE UI" : "DASHX360 UI";
+        const char* tag5 = (ct == 2) ? "VICEOS CUSTOM UI" : (ct == 1 ? "DASHX360 UI" : "PS5_ONLINE UI");
         ImVec2 t5s = ImGui::CalcTextSize(tag5);
-        dl->AddText(ImVec2(cMax.x - t5s.x - 18.0f, cMin.y + 21.0f), ColAlpha(Palette::TextHi, 0.86f * alpha), tag5);
+        dl->AddText(ImVec2(cMax.x - t5s.x - 18.0f, cMin.y + 19.0f), ColAlpha(Palette::TextHi, 0.86f * alpha), tag5);
         ImGui::PopFont();
 
-        float y = cMin.y + bannerH + 10.0f;
+        float y = cMin.y + bannerH + 8.0f;
         ImGui::PushFont(fonts.title);
         dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextHi, alpha), "GTA V EMULATOR");
         ImGui::PopFont();
-        y += 32.0f;
-
-        dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextMid, alpha),
-                    isPs5 ? "Boots PlayStation 5 Home UI (Xbox->PS5 Port) with GTA V"
-                          : "Boots Xbox DashX360 (Metro & Blades) with GTA V");
         y += 28.0f;
+
+        const char* desc5 = (ct == 2)
+            ? "Boots ViceOS Neo Custom Console OS with GTA V"
+            : (ct == 1 ? "Boots Xbox DashX360 (Metro & Blades) with GTA V"
+                       : "Boots PlayStation 5 Home UI (Xbox->PS5 Port) with GTA V");
+        dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextMid, alpha), desc5);
+        y += 24.0f;
 
         // Live PC Enhancement Badges
         std::vector<std::string> specs5;
@@ -1036,14 +1067,16 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         }
         ImGui::PopFont();
 
-        // Primary CTA Button -> Opens PS5 or Xbox Console UI with GTA V mounted!
-        ImGui::SetCursorPos(ImVec2(cMin.x + 22.0f, cMax.y - 68.0f));
+        // Primary CTA Button -> Opens PS5, Xbox, or ViceOS Neo UI with GTA V mounted!
+        ImGui::SetCursorPos(ImVec2(cMin.x + 22.0f, cMax.y - 62.0f));
         ImVec2 btnC{};
         ImGui::PushFont(fonts.bold);
-        const char* launchLbl = isPs5 ? "BOOT PS5 EMULATOR  (GTA V)" : "BOOT XBOX EMULATOR  (GTA V)";
-        ImVec4 btnDark = isPs5 ? ImVec4(0.03f, 0.26f, 0.62f, 1.0f) : Palette::EmeraldDeep;
+        const char* launchLbl = (ct == 2) ? "BOOT VICEOS NEO  (GTA V)"
+                              : (ct == 1 ? "BOOT XBOX EMULATOR  (GTA V)" : "BOOT PS5 EMULATOR  (GTA V)");
+        ImVec4 btnDark = (ct == 2) ? ImVec4(0.05f, 0.34f, 0.56f, 1.0f)
+                       : (ct == 1 ? Palette::EmeraldDeep : ImVec4(0.03f, 0.26f, 0.62f, 1.0f));
         bool launchClicked = !app.launching && DrawNeonButton(
-            "##launch_gta5", launchLbl, ImVec2(cardW - 44.0f, 46.0f),
+            "##launch_gta5", launchLbl, ImVec2(cardW - 44.0f, 44.0f),
             btnDark, c5Accent, app.btnLaunch5Hover, dt, sfx, false, alpha, &btnC);
         ImGui::PopFont();
 
@@ -1072,30 +1105,30 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         ImVec4 c6Accent = devGta6Ready ? kDevGold : Palette::VicePink;
         DrawGlassCard(dl, cMin, cMax, 16.0f, c6Accent, app.card6Hover, alpha, !devGta6Ready);
 
-        float bannerH = std::min(162.0f, cardH * 0.36f);
+        float bannerH = std::min(134.0f, cardH * 0.32f);
         ImVec2 bMin(cMin.x + 1.0f, cMin.y + 1.0f);
         ImVec2 bMax(cMax.x - 1.0f, cMin.y + bannerH);
         DrawGta6BannerArt(dl, bMin, bMax, time, app.card6Hover, alpha);
 
-        DrawStatusPill(dl, ImVec2(cMin.x + 18.0f, cMin.y + 16.0f),
+        DrawStatusPill(dl, ImVec2(cMin.x + 18.0f, cMin.y + 14.0f),
                        devGta6Ready ? "FOXXY DEV · GTA VI ACTIVE" : "IN DEVELOPMENT · CYBERLEEKS",
                        c6Accent, alpha, true);
         ImGui::PushFont(fonts.mono);
         const char* tag6 = devGta6Ready ? "CUSTOM .EXE HOOK" : "XBOX PORT WIP";
         ImVec2 t6s = ImGui::CalcTextSize(tag6);
-        dl->AddText(ImVec2(cMax.x - t6s.x - 18.0f, cMin.y + 21.0f), ColAlpha(Palette::Cyan, 0.88f * alpha), tag6);
+        dl->AddText(ImVec2(cMax.x - t6s.x - 18.0f, cMin.y + 19.0f), ColAlpha(Palette::Cyan, 0.88f * alpha), tag6);
         ImGui::PopFont();
 
-        float y = cMin.y + bannerH + 10.0f;
+        float y = cMin.y + bannerH + 8.0f;
         ImGui::PushFont(fonts.title);
         dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextHi, 0.94f * alpha), "GTA VI EMULATOR");
         ImGui::PopFont();
-        y += 32.0f;
+        y += 28.0f;
 
         dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextMid, 0.92f * alpha),
-                    devGta6Ready ? "Developer Override Active — Launch GTA VI inside PS5/Xbox UI"
+                    devGta6Ready ? "Developer Override Active — Launch GTA VI inside Console UI"
                                  : "Grand Theft Auto VI — Cyberleeks Xbox-to-PS5 Port Status");
-        y += 28.0f;
+        y += 24.0f;
 
         const char* specs6[3] = {
             "RAGE9 XBSX",
@@ -1137,14 +1170,15 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
                         boxTxt.c_str(), nullptr, (boxMax.x - boxMin.x) - 24.0f);
         }
 
-        ImGui::SetCursorPos(ImVec2(cMin.x + 22.0f, cMax.y - 68.0f));
+        ImGui::SetCursorPos(ImVec2(cMin.x + 22.0f, cMax.y - 62.0f));
         ImVec2 btnC6{};
         ImGui::PushFont(fonts.bold);
         const char* cta6 = devGta6Ready
-            ? (isPs5 ? "BOOT PS5 UI  (GTA VI DEV MOUNTED)" : "BOOT XBOX UI  (GTA VI DEV MOUNTED)")
+            ? (ct == 2 ? "BOOT VICEOS NEO  (GTA VI DEV)"
+                       : (ct == 1 ? "BOOT XBOX UI  (GTA VI DEV)" : "BOOT PS5 UI  (GTA VI DEV)"))
             : (app.isFoxxyDev ? "OPEN FOXXY DEVELOPER SETTINGS" : "VIEW GTA 6 UPDATES  ·  CYBERLEEKS");
         bool click6 = !app.launching && DrawNeonButton(
-            "##btn_gta6", cta6, ImVec2(cardW - 44.0f, 46.0f),
+            "##btn_gta6", cta6, ImVec2(cardW - 44.0f, 44.0f),
             (devGta6Ready || app.isFoxxyDev) ? kDevGoldDk : ImVec4(0.56f, 0.09f, 0.34f, 1.0f),
             (devGta6Ready || app.isFoxxyDev) ? kDevGold : c6Accent, app.btnGta6Hover, dt, sfx, false, alpha, &btnC6);
         ImGui::PopFont();
@@ -1171,10 +1205,54 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
     }
 
     // ------------------------------------------------------------------
+    // NEW MODE BANNER: ALL MODE (GTA V + GTA VI SIMULTANEOUS · MIGHT BE BUGGY)
+    // ------------------------------------------------------------------
+    {
+        ImVec2 aMin(marginX, allBarY);
+        ImVec2 aMax(winW - marginX, allBarY + allBarH);
+        dl->AddRectFilledMultiColor(
+            aMin, aMax,
+            ColAlpha(ImVec4(0.16f, 0.11f, 0.02f, 0.90f), alpha),
+            ColAlpha(ImVec4(0.18f, 0.04f, 0.14f, 0.90f), alpha),
+            ColAlpha(ImVec4(0.11f, 0.04f, 0.16f, 0.92f), alpha),
+            ColAlpha(ImVec4(0.11f, 0.07f, 0.02f, 0.92f), alpha));
+        dl->AddRect(aMin, aMax, ColAlpha(kDevGold, 0.62f * alpha), 13.0f, 0, 1.3f);
+
+        ImGui::PushFont(fonts.bold);
+        dl->AddText(ImVec2(aMin.x + 18.0f, aMin.y + 12.0f), ColAlpha(Palette::TextHi, alpha),
+                    "ALL MODE  —  GTA V + GTA VI AT THE SAME TIME");
+        ImGui::PopFont();
+
+        DrawStatusPill(dl, ImVec2(aMin.x + 392.0f, aMin.y + 9.0f),
+                       "EXPERIMENTAL · MIGHT BE BUGGY", kDevGold, alpha, true);
+
+        dl->AddText(nullptr, 13.5f, ImVec2(aMin.x + 18.0f, aMin.y + 39.0f),
+                    ColAlpha(ImVec4(1.0f, 0.90f, 0.66f, 0.94f), alpha),
+                    "Unlocks BOTH Grand Theft Auto V and Grand Theft Auto VI simultaneously in your selected Console UI. May be buggy or increase GPU/RAM load.");
+
+        const float btnW = 258.0f;
+        ImGui::SetCursorPos(ImVec2(aMax.x - btnW - 14.0f, aMin.y + (allBarH - 42.0f) * 0.5f));
+        ImVec2 allBtnC{};
+        char allLbl[64];
+        std::snprintf(allLbl, sizeof(allLbl), "BOOT %s  (ALL MODE)", GetConsoleTag(ct));
+        ImGui::PushFont(fonts.bold);
+        bool clickAll = !app.launching && DrawNeonButton(
+            "##btn_all_mode", allLbl, ImVec2(btnW, 42.0f),
+            kDevGoldDk, kDevGold, app.btnAllModeHover, dt, sfx, false, alpha, &allBtnC);
+        ImGui::PopFont();
+
+        if (clickAll) {
+            app.PushLog("[ALL MODE] Experimental dual-title launch (GTA V + GTA VI) — might be buggy!");
+            app.ShowToast("ALL MODE (Might be buggy): Mounting both GTA V & GTA VI simultaneously!", kDevGold);
+            TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, allBtnC, "all", false);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // BOTTOM LIVE REAL PC HARDWARE & LOCAL SERVER TELEMETRY BAR
     // ------------------------------------------------------------------
     {
-        float barY = winH - statusBarH - 14.0f;
+        float barY = winH - statusBarH - 12.0f;
         ImVec2 bMin(marginX, barY);
         ImVec2 bMax(winW - marginX, barY + statusBarH);
         dl->AddRectFilled(bMin, bMax, ColAlpha(ImVec4(0.048f, 0.064f, 0.112f, 0.90f), alpha), 12.0f);
@@ -1199,19 +1277,21 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
                     ColAlpha(Palette::TextMid, alpha), hwLine);
         ImGui::PopFont();
 
-        // Direct fallback button: opens active PS5/Xbox console menu straight in System Browser
-        const float fbW = 152.0f;
-        const float fbH = 30.0f;
-        ImVec2 fbPos(bMax.x - fbW - 14.0f, bMin.y + (statusBarH - fbH) * 0.5f);
+        // Direct fallback button: opens active PS5 / Xbox / ViceOS Neo console menu straight in System Browser
+        const float fbW = 176.0f;
+        const float fbH = 28.0f;
+        ImVec2 fbPos(bMax.x - fbW - 12.0f, bMin.y + (statusBarH - fbH) * 0.5f);
         ImGui::SetCursorPos(fbPos);
         ImGui::PushFont(fonts.mono);
-        if (ImGui::Button(isPs5 ? "OPEN PS5 IN BROWSER" : "OPEN XBOX IN BROWSER", ImVec2(fbW, fbH))) {
+        char fbLbl[48];
+        std::snprintf(fbLbl, sizeof(fbLbl), "OPEN %s IN BROWSER", GetConsoleTag(ct));
+        if (ImGui::Button(fbLbl, ImVec2(fbW, fbH))) {
             app.SyncToShared(shared, sharedMu, "gta5");
-            std::string directUrl = server.BaseUrl() + (isPs5 ? "/ps5/" : "/xbox/");
+            std::string directUrl = server.BaseUrl() + GetConsoleRoute(ct);
             LaunchGameViewport(directUrl, 2, false);
             sfx.Play(SfxId::Launch, 0.85f);
             app.PushLog("[BROWSER] Opened direct console UI: " + directUrl);
-            app.ShowToast("Opened " + directUrl + " in default browser!", isPs5 ? kPs5Blue : Palette::Emerald);
+            app.ShowToast("Opened " + directUrl + " in default browser!", activeConCol);
         }
         ImGui::PopFont();
     }
@@ -1372,7 +1452,7 @@ static void RenderConfigTab(AppState& app, const FontSet& fonts, SoundEngine& sf
         y += 20.0f;
         ImGui::SetCursorPos(ImVec2(x, y));
         ImGui::SetNextItemWidth(w);
-        if (ImGui::Combo("##console_combo", &app.config.consoleTarget, kConsoleNames, 2)) {
+        if (ImGui::Combo("##console_combo", &app.config.consoleTarget, kConsoleNames, 3)) {
             changed = true;
             sfx.Play(SfxId::Click, 0.65f);
         }
@@ -1709,14 +1789,16 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     }
     y += 66.0f;
 
-    // 5. Boot Console UI with GTA VI Mounted (convenience button)
+    // 5. Boot Console UI with GTA VI Mounted OR ALL Mode (GTA V + GTA VI)
+    const int devCt = std::max(0, std::min(2, app.config.consoleTarget));
+    char devBootLbl[80];
+    std::snprintf(devBootLbl, sizeof(devBootLbl), "OPEN %s UI  (GTA VI MOUNTED)", GetConsoleTag(devCt));
     ImGui::SetCursorPos(ImVec2(x, y));
     ImVec2 bCenter{};
     ImGui::PushFont(fonts.bold);
     bool bootDevConsole = !app.launching && DrawNeonButton(
-        "##dev_boot_console",
-        app.config.consoleTarget == 0 ? "OPEN PLAYSTATION 5 UI  (GTA VI MOUNTED)" : "OPEN XBOX DASHX360 UI  (GTA VI MOUNTED)",
-        ImVec2(410.0f, 44.0f), kDevGoldDk, kDevGold, app.btnDevLaunchHover, dt, sfx,
+        "##dev_boot_console", devBootLbl,
+        ImVec2(360.0f, 44.0f), kDevGoldDk, kDevGold, app.btnDevLaunchHover, dt, sfx,
         !(app.config.devGta6Enabled && !app.config.devGta6ExePath.empty()), alpha, &bCenter);
     ImGui::PopFont();
 
@@ -1726,6 +1808,18 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
         } else {
             TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bCenter, "gta6", false);
         }
+    }
+
+    ImGui::SetCursorPos(ImVec2(x + 376.0f, y));
+    ImVec2 bAllCenter{};
+    ImGui::PushFont(fonts.bold);
+    bool bootDevAll = !app.launching && DrawNeonButton(
+        "##dev_boot_all", "OPEN ALL MODE  (GTA V + VI · BUGGY)",
+        ImVec2(340.0f, 44.0f), ImVec4(0.45f, 0.12f, 0.34f, 1.0f), Palette::VicePink,
+        app.btnDevAllHover, dt, sfx, false, alpha, &bAllCenter);
+    ImGui::PopFont();
+    if (bootDevAll) {
+        TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bAllCenter, "all", false);
     }
 
     ImGui::PopStyleVar();
@@ -1911,7 +2005,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ParticleSystem particles;
     particles.Init(static_cast<float>(winW), static_cast<float>(winH));
 
-    app.PushLog("[HYPERVISOR] ViceBox X v2.3 initialized (GTA V Sensitivity + Full GTA VI Dev Overlay + Fake FPS Cap)");
+    app.PushLog("[HYPERVISOR] ViceBox X v2.4 initialized (ALL Mode Dual-Title + ViceOS Neo Custom Console + Full Dev Suite)");
     app.PushLog("[D3D11] Active GPU: " + app.hw.gpuName);
     app.PushLog("[HWMON] Real Windows CPU/GPU/VRAM/RAM telemetry monitor started");
     if (serverOk) {

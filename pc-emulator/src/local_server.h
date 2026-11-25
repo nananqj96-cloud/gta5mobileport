@@ -25,8 +25,8 @@
 namespace vicebox {
 
 struct SharedEmulatorState {
-    std::string consoleTarget      = "ps5";    // "ps5" | "xbox"
-    std::string emulatedGame       = "gta5";   // "gta5" | "gta6"
+    std::string consoleTarget      = "ps5";    // "ps5" | "xbox" | "viceos"
+    std::string emulatedGame       = "gta5";   // "gta5" | "gta6" | "all"
     std::string profileName        = "Player";
     std::string psPlusTier         = "Extra";  // "None" | "Essential" | "Extra" | "Deluxe"
     bool        showDebugHud       = true;
@@ -402,6 +402,7 @@ private:
             {
                 std::lock_guard<std::mutex> lk(*stateMu_);
                 if (shared_->consoleTarget == "xbox") loc = "/xbox/";
+                else if (shared_->consoleTarget == "viceos") loc = "/viceos/";
             }
             SendResponse(client, 302, "Found", "text/plain", nullptr, 0,
                          "Location: " + loc + "\r\n", true);
@@ -415,6 +416,10 @@ private:
         }
         if (path == "/xbox" || path == "/xbox/") {
             ServeEmbedded(client, "/vbx/xbox.html", headOnly, true);
+            return;
+        }
+        if (path == "/viceos" || path == "/viceos/") {
+            ServeEmbedded(client, "/vbx/viceos.html", headOnly, true);
             return;
         }
         if (path == "/updates/gta6" || path == "/updates/gta6/") {
@@ -548,6 +553,11 @@ private:
         if (ExtractJsonInt(body, "resIndex", iVal)) {
             shared_->resIndex = std::max(0, std::min(4, iVal));
         }
+        if (ExtractJsonString(body, "emulatedGame", sVal)) {
+            if (sVal == "gta5" || sVal == "gta6" || sVal == "all") {
+                shared_->emulatedGame = sVal;
+            }
+        }
         if (ExtractJsonInt(body, "gta5Mode", iVal)) {
             shared_->gta5Mode = std::max(0, std::min(3, iVal));
         }
@@ -558,7 +568,7 @@ private:
     void HandleSwitchConsole(SOCKET client, const std::string& body) {
         std::string target;
         if (ExtractJsonString(body, "consoleTarget", target)) {
-            if (target == "xbox" || target == "ps5") {
+            if (target == "xbox" || target == "ps5" || target == "viceos") {
                 std::lock_guard<std::mutex> lk(*stateMu_);
                 shared_->consoleTarget = target;
                 shared_->configDirtyFromWeb = true;
@@ -575,8 +585,9 @@ private:
         int devFakeFpsLimit = 30;
         {
             std::lock_guard<std::mutex> lk(*stateMu_);
+            bool gameOk = (shared_->emulatedGame == "gta6" || shared_->emulatedGame == "all");
             allowed = shared_->isFoxxyDev && shared_->devGta6Enabled &&
-                      shared_->emulatedGame == "gta6" && !shared_->devGta6ExePath.empty();
+                      gameOk && !shared_->devGta6ExePath.empty();
             targetPath = shared_->devGta6ExePath;
             devFullOverlay = shared_->devFullOverlay;
             devFakeFpsEnabled = shared_->devFakeFpsEnabled;
@@ -739,7 +750,7 @@ private:
             ".p{background:#2563eb;color:#fff;}.g{background:#334155;color:#fff;}</style></head><body>"
             "<div class='card'><h2>GTA V Stream Connection</h2><p style='color:#94a3b8;'>" + reason +
             "</p><button class='p' onclick='location.reload()'>Retry Connection</button>"
-            "<button class='g' onclick=\"location.href='/ps5/'\">Back to Console UI</button></div></body></html>";
+            "<button class='g' onclick=\"location.href='/'\">Back to Console UI</button></div></body></html>";
         SendResponse(client, 503, "Service Unavailable", "text/html; charset=utf-8",
                      page.data(), page.size(), "Cache-Control: no-store\r\n");
     }

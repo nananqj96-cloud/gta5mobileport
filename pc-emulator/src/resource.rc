@@ -4,8 +4,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 2,3,0,0
- PRODUCTVERSION 2,3,0,0
+ FILEVERSION 2,4,0,0
+ PRODUCTVERSION 2,4,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -17,12 +17,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName",      "ViceBox Hypervisor"
-            VALUE "FileDescription",  "VICEBOX X - PS5 & Xbox PC Emulator (GTA V + GTA VI Cyberleeks Build)"
-            VALUE "FileVersion",      "2.3.0.0"
+            VALUE "FileDescription",  "VICEBOX X - PS5, Xbox & ViceOS Neo PC Emulator (GTA V + GTA VI + ALL Mode)"
+            VALUE "FileVersion",      "2.4.0.0"
             VALUE "InternalName",     "ViceBox-GTA6-Emulator"
             VALUE "OriginalFilename", "ViceBox-GTA6-Emulator.exe"
             VALUE "ProductName",      "VICEBOX X"
-            VALUE "ProductVersion",   "2.3.0.0"
+            VALUE "ProductVersion",   "2.4.0.0"
         END
     END
     BLOCK "VarFileInfo"

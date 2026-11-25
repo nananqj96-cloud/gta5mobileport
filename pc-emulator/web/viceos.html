@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ViceOS Neo — ViceBox X Custom Console Emulator</title>
+<style>
+  :root {
+    --accent: #00e5ff;
+    --accent2: #ff2e97;
+    --gold: #ffb830;
+    --green: #19db7a;
+    --bg: #05070e;
+    --glass: rgba(11, 16, 30, 0.74);
+    --glass-hi: rgba(18, 26, 48, 0.88);
+    --border: rgba(255, 255, 255, 0.13);
+    --text: #f4f7ff;
+    --muted: #98a9c8;
+  }
+  body.theme-cyan  { --accent: #00e5ff; --accent2: #3b82f6; }
+  body.theme-gold  { --accent: #facc15; --accent2: #f97316; }
+  body.theme-green { --accent: #19db7a; --accent2: #00e5ff; }
+
+  * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+
+  /* ==================== AMBIENT NEO-GLASS BACKDROP ==================== */
+  #hero-bg {
+    position: fixed; inset: 0; z-index: 0;
+    background-size: cover; background-position: center 22%;
+    transition: background-image 0.55s ease, transform 0.8s ease;
+    filter: brightness(0.46) saturate(1.18);
+    transform: scale(1.04);
+  }
+  #hero-vignette {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(ellipse 75% 65% at 72% 28%, rgba(0, 229, 255, 0.16), transparent 65%),
+      radial-gradient(ellipse 65% 58% at 18% 82%, rgba(255, 46, 151, 0.18), transparent 68%),
+      linear-gradient(180deg, rgba(5, 7, 14, 0.72) 0%, rgba(5, 7, 14, 0.34) 42%, rgba(5, 7, 14, 0.94) 84%, #05070e 100%),
+      linear-gradient(90deg, rgba(5, 7, 14, 0.88) 0%, rgba(5, 7, 14, 0.35) 55%, rgba(5, 7, 14, 0.55) 100%);
+  }
+  #aurora-grid {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.12;
+    background-image:
+      linear-gradient(rgba(0, 229, 255, 0.25) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 46, 151, 0.2) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: linear-gradient(180deg, transparent 20%, rgba(0,0,0,0.8) 100%);
+  }
+
+  /* ==================== BOOT SPLASH (SKIPPABLE) ==================== */
+  #vice-boot {
+    position: fixed; inset: 0; z-index: 9000;
+    background: radial-gradient(circle at 50% 45%, #111834 0%, #05070e 72%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    transition: opacity 0.55s ease, visibility 0.55s ease;
+  }
+  #vice-boot.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  .boot-orb {
+    width: 108px; height: 108px; border-radius: 28px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 60px rgba(0, 229, 255, 0.48), 0 0 110px rgba(255, 46, 151, 0.34);
+    animation: orbPulse 1.8s ease-in-out infinite;
+    font-size: 46px; font-weight: 900; letter-spacing: -2px; color: #05070e;
+  }
+  @keyframes orbPulse {
+    0%, 100% { transform: scale(1) rotate(0deg); }
+    50% { transform: scale(1.06) rotate(2deg); }
+  }
+  .boot-title {
+    font-size: 36px; font-weight: 800; letter-spacing: 6px;
+    background: linear-gradient(90deg, #fff, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .boot-sub { font-size: 13px; letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; }
+  .boot-bar-wrap { width: 280px; height: 5px; border-radius: 99px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 8px; }
+  .boot-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.25s linear; }
+  .boot-hint { position: absolute; bottom: 34px; font-size: 12.5px; color: rgba(255,255,255,0.58); letter-spacing: 1px; }
+
+  /* ==================== MAIN SHELL ==================== */
+  #shell {
+    position: relative; z-index: 10; width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+  }
+
+  /* TOP FLOATING DOCK */
+  .top-dock {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 34px 10px; gap: 16px; flex-shrink: 0;
+  }
+  .brand-pill {
+    display: flex; align-items: center; gap: 11px;
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 16px 7px 10px;
+  }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #05070e; font-weight: 900; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-name { font-weight: 800; font-size: 14px; letter-spacing: 1.6px; }
+  .mode-chip {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+    padding: 3px 10px; border-radius: 999px;
+    background: rgba(0, 229, 255, 0.16); border: 1px solid rgba(0, 229, 255, 0.45); color: var(--accent);
+  }
+  .mode-chip.all-warn {
+    background: rgba(255, 184, 48, 0.20); border-color: var(--gold); color: var(--gold);
+    animation: warnGlow 2s ease-in-out infinite;
+  }
+  @keyframes warnGlow {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 184, 48, 0); }
+    50% { box-shadow: 0 0 14px rgba(255, 184, 48, 0.45); }
+  }
+
+  .nav-pills {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px;
+  }
+  .nav-pill {
+    border: none; background: transparent; color: var(--muted);
+    padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.6px; cursor: pointer; transition: 0.18s ease;
+  }
+  .nav-pill:hover { color: #fff; background: rgba(255,255,255,0.07); }
+  .nav-pill.active {
+    color: #05070e; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.35);
+  }
+
+  .status-dock {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px;
+    font-size: 12px;
+  }
+  .hw-mini {
+    font-family: Consolas, 'Cascadia Mono', monospace; font-size: 11.5px; color: #bfefff;
+    padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.14);
+  }
+  .pad-chip {
+    font-size: 11px; font-weight: 700; color: var(--green);
+    padding: 3px 9px; border-radius: 999px; background: rgba(25, 219, 122, 0.14);
+    border: 1px solid rgba(25, 219, 122, 0.35);
+  }
+  .pad-chip.idle { color: var(--muted); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+  .user-chip { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .user-chip img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--accent); }
+  .clock-txt { font-family: Consolas, monospace; font-weight: 700; color: #fff; padding-left: 6px; }
+
+  /* BUGGY WARNING RIBBON (SHOWN IN ALL MODE) */
+  #all-mode-banner {
+    display: none; margin: 2px 34px 0; padding: 8px 16px; border-radius: 12px;
+    background: linear-gradient(90deg, rgba(255, 184, 48, 0.20), rgba(255, 46, 151, 0.16));
+    border: 1px solid rgba(255, 184, 48, 0.55);
+    font-size: 12.5px; color: #ffe7a8; align-items: center; justify-content: space-between; gap: 12px;
+    flex-shrink: 0;
+  }
+  #all-mode-banner.show { display: flex; }
+
+  /* ==================== STAGE VIEWS ==================== */
+  #stage { flex: 1; position: relative; overflow: hidden; padding: 14px 34px 12px; display: flex; flex-direction: column; }
+  .view-panel { display: none; width: 100%; height: 100%; flex-direction: column; }
+  .view-panel.active { display: flex; }
+
+  /* ---- HOME VIEW: HERO + COVERFLOW ---- */
+  .hero-stage {
+    flex: 1; display: flex; align-items: flex-end; justify-content: space-between;
+    padding-bottom: 22px; gap: 28px; min-height: 0;
+  }
+  .hero-info { max-width: 680px; }
+  .hero-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .h-tag {
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px;
+    padding: 4px 11px; border-radius: 999px;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+  }
+  .h-tag.ready { background: rgba(25, 219, 122, 0.22); border-color: var(--green); color: #86efac; }
+  .h-tag.all   { background: rgba(255, 184, 48, 0.22); border-color: var(--gold); color: #fde68a; }
+  .h-tag.locked { background: rgba(255, 46, 151, 0.16); border-color: rgba(255, 46, 151, 0.5); color: #f9a8d4; }
+  .hero-logo { max-height: 78px; max-width: 390px; object-fit: contain; margin-bottom: 10px; filter: drop-shadow(0 8px 24px rgba(0,0,0,0.8)); }
+  .hero-title { margin: 0 0 8px; font-size: 42px; font-weight: 800; line-height: 1.08; text-shadow: 0 8px 28px rgba(0,0,0,0.85); }
+  .hero-desc { margin: 0 0 20px; font-size: 15px; line-height: 1.52; color: rgba(236, 243, 255, 0.86); max-width: 590px; }
+
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .v-btn {
+    border: 1px solid rgba(255,255,255,0.2); background: var(--glass-hi); color: #fff;
+    padding: 13px 24px; border-radius: 14px; font-size: 14.5px; font-weight: 700;
+    letter-spacing: 0.4px; cursor: pointer; backdrop-filter: blur(14px);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    display: inline-flex; align-items: center; gap: 9px;
+  }
+  .v-btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .v-btn.primary {
+    border: none; color: #05070e;
+    background: linear-gradient(90deg, var(--accent), #6cf5ff 55%, var(--accent2));
+    box-shadow: 0 10px 34px rgba(0, 229, 255, 0.35);
+    padding: 14px 32px; font-size: 15.5px;
+  }
+  .v-btn.gold {
+    border: 1px solid var(--gold); color: #fff7dc;
+    background: linear-gradient(90deg, rgba(255, 184, 48, 0.32), rgba(255, 46, 151, 0.28));
+  }
+
+  .hero-side-card {
+    width: 310px; flex-shrink: 0;
+    background: var(--glass); backdrop-filter: blur(20px);
+    border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px;
+  }
+  .hsc-title { font-size: 11px; letter-spacing: 1.2px; color: var(--accent); font-weight: 800; margin-bottom: 10px; }
+  .hsc-row { display: flex; justify-content: space-between; font-size: 12.5px; margin: 7px 0; color: var(--muted); }
+  .hsc-row strong { color: #fff; font-family: Consolas, monospace; }
+  .bar-track { height: 5px; border-radius: 99px; background: rgba(255,255,255,0.1); overflow: hidden; margin-bottom: 8px; }
+  .bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.35s ease; }
+
+  /* COVERFLOW CAROUSEL */
+  .carousel-wrap {
+    flex-shrink: 0; padding: 10px 4px 6px;
+    display: flex; gap: 15px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth;
+    align-items: flex-end;
+  }
+  .carousel-wrap::-webkit-scrollbar { display: none; }
+  .game-tile {
+    position: relative; width: 168px; height: 168px; flex-shrink: 0;
+    border-radius: 20px; overflow: hidden; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.14);
+    background: #0d1324; transition: transform 0.22s ease, border-color 0.2s ease, box-shadow 0.22s ease, width 0.22s ease;
+  }
+  .game-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease; }
+  .game-tile:hover { transform: translateY(-6px); border-color: rgba(255,255,255,0.45); }
+  .game-tile.selected {
+    width: 214px; height: 190px; transform: translateY(-8px);
+    border: 2.5px solid var(--accent);
+    box-shadow: 0 18px 46px rgba(0, 229, 255, 0.32), 0 0 0 3px rgba(255, 46, 151, 0.25);
+  }
+  .tile-badge {
+    position: absolute; top: 9px; left: 9px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.6px;
+    padding: 3px 8px; border-radius: 999px;
+    background: rgba(5, 7, 14, 0.84); border: 1px solid rgba(255,255,255,0.22); color: #fff;
+  }
+  .tile-badge.ready { background: rgba(10, 42, 26, 0.92); border-color: var(--green); color: #86efac; }
+  .tile-badge.all   { background: rgba(58, 38, 6, 0.92); border-color: var(--gold); color: #fde68a; }
+  .tile-foot {
+    position: absolute; inset: auto 0 0 0; padding: 24px 11px 9px;
+    background: linear-gradient(180deg, transparent, rgba(5, 7, 14, 0.92));
+    font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* ---- LIBRARY VIEW ---- */
+  .lib-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px; overflow-y: auto; padding: 6px 4px 16px;
+  }
+  .lib-card {
+    background: var(--glass); backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 16px; overflow: hidden; cursor: pointer;
+    transition: transform 0.18s ease, border-color 0.18s ease;
+  }
+  .lib-card:hover { transform: translateY(-4px); border-color: var(--accent); }
+  .lib-card img { width: 100%; height: 124px; object-fit: cover; display: block; }
+  .lib-card-body { padding: 12px 14px; }
+  .lib-card-title { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; }
+  .lib-card-sub { font-size: 12px; color: var(--muted); }
+
+  /* ---- SETTINGS VIEW (2-ZONE CONTROLLER READY) ---- */
+  .settings-layout {
+    flex: 1; display: grid; grid-template-columns: 270px 1fr; gap: 18px; min-height: 0;
+  }
+  .set-sidebar {
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 18px; padding: 12px;
+    display: flex; flex-direction: column; gap: 6px; overflow-y: auto;
+  }
+  .set-cat {
+    border: 1px solid transparent; background: transparent; color: var(--muted);
+    padding: 13px 15px; border-radius: 12px; text-align: left; cursor: pointer;
+    font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 11px;
+    transition: 0.15s ease;
+  }
+  .set-cat:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .set-cat.active {
+    background: linear-gradient(90deg, rgba(0, 229, 255, 0.2), rgba(255, 46, 151, 0.14));
+    border-color: rgba(0, 229, 255, 0.55); color: #fff;
+  }
+  .set-pane {
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 18px; padding: 22px 26px;
+    overflow-y: auto;
+  }
+  .set-pane h2 { margin: 0 0 6px; font-size: 24px; }
+  .set-pane .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
+  .s-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 16px; border-radius: 14px; margin-bottom: 10px;
+    background: rgba(8, 12, 24, 0.65); border: 1px solid rgba(255,255,255,0.09);
+  }
+  .s-row .lbl { font-size: 14.5px; font-weight: 700; }
+  .s-row .desc { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .s-input, .s-select {
+    background: rgba(12, 18, 36, 0.95); color: #fff;
+    border: 1px solid rgba(255,255,255,0.22); border-radius: 10px;
+    padding: 8px 12px; font-size: 13.5px; min-width: 190px;
+  }
+  input[type="checkbox"].v-chk { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+  input[type="range"].v-rng { width: 210px; accent-color: var(--accent); cursor: pointer; }
+
+  .warn-box {
+    padding: 14px 16px; border-radius: 14px; margin-bottom: 14px;
+    background: rgba(255, 184, 48, 0.14); border: 1px solid rgba(255, 184, 48, 0.55);
+    color: #ffe8a3; font-size: 13px; line-height: 1.5;
+  }
+
+  /* ---- QUICK ACCESS SLIDE-OVER DECK (STEAMOS STYLE) ---- */
+  #quick-deck {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 390px; max-width: 92vw;
+    z-index: 5000; background: rgba(7, 11, 22, 0.95); backdrop-filter: blur(26px);
+    border-left: 1px solid rgba(0, 229, 255, 0.35);
+    box-shadow: -24px 0 70px rgba(0,0,0,0.8);
+    transform: translateX(105%); transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+    display: flex; flex-direction: column; padding: 20px 20px 18px;
+  }
+  #quick-deck.open { transform: translateX(0); }
+  .qd-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .qd-hdr h3 { margin: 0; font-size: 16px; letter-spacing: 1px; color: var(--accent); }
+  .qd-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .qd-card {
+    background: rgba(16, 24, 44, 0.8); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 13px; padding: 12px 14px;
+  }
+  .qd-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+
+  /* ---- BOTTOM CONTROLLER PROMPT FOOTER ---- */
+  .prompt-bar {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 34px 12px; font-size: 12px; color: var(--muted);
+    background: linear-gradient(180deg, transparent, rgba(5, 7, 14, 0.92));
+  }
+  .prompts { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+  .p-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 22px; padding: 0 7px; border-radius: 6px;
+    background: rgba(255,255,255,0.13); border: 1px solid rgba(255,255,255,0.25);
+    color: #fff; font-weight: 800; font-size: 11px; margin-right: 6px;
+  }
+
+  /* ---- MODAL & TOAST ---- */
+  #v-modal-bg {
+    position: fixed; inset: 0; z-index: 7000;
+    background: rgba(3, 5, 12, 0.78); backdrop-filter: blur(10px);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  #v-modal-bg.open { display: flex; }
+  .v-modal {
+    width: 100%; max-width: 560px; background: #0d1326;
+    border: 1px solid rgba(0, 229, 255, 0.42); border-radius: 20px; padding: 26px 28px;
+    box-shadow: 0 30px 90px rgba(0,0,0,0.85);
+  }
+  .v-modal h3 { margin: 0 0 10px; font-size: 21px; }
+  .v-modal p { margin: 0 0 14px; color: #cbd5e1; line-height: 1.55; font-size: 14.5px; }
+  .v-modal-acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+
+  #v-toast {
+    position: fixed; top: 82px; right: 34px; z-index: 8500;
+    background: rgba(10, 15, 30, 0.95); border: 1px solid var(--accent);
+    border-left: 4px solid var(--accent); color: #fff; padding: 12px 18px;
+    border-radius: 12px; font-size: 13.5px; font-weight: 600;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.65);
+    opacity: 0; transform: translateX(24px); pointer-events: none; transition: 0.22s ease;
+  }
+  #v-toast.show { opacity: 1; transform: translateX(0); }
+
+  /* HIGH-VISIBILITY CONTROLLER FOCUS RING */
+  .pad-focus {
+    outline: 2.5px solid #ffffff !important;
+    box-shadow: 0 0 0 4px rgba(0, 229, 255, 0.72), 0 0 24px rgba(255, 46, 151, 0.48) !important;
+  }
+</style>
+</head>
+<body>
+
+<div id="hero-bg"></div>
+<div id="hero-vignette"></div>
+<div id="aurora-grid"></div>
+
+<!-- ==================== VICEOS NEO BOOT ==================== -->
+<div id="vice-boot">
+  <div class="boot-orb">V</div>
+  <div class="boot-title">VICEOS NEO</div>
+  <div class="boot-sub">ViceBox X Custom Console OS · Controller &amp; PC Hypervisor</div>
+  <div class="boot-bar-wrap"><div class="boot-bar-fill" id="bootBar"></div></div>
+  <div class="boot-hint">Press A / ✕ / Enter / Click to skip</div>
+</div>
+
+<!-- ==================== MAIN CONSOLE SHELL ==================== -->
+<div id="shell">
+  <header class="top-dock">
+    <div class="brand-pill">
+      <div class="brand-mark">V</div>
+      <div class="brand-name">VICEOS NEO</div>
+      <span class="mode-chip" id="topModeChip">GTA V MOUNTED</span>
+    </div>
+
+    <nav class="nav-pills" id="topTabs">
+      <button class="nav-pill active" data-view="home">HOME</button>
+      <button class="nav-pill" data-view="library">LIBRARY</button>
+      <button class="nav-pill" data-view="settings">SYSTEM</button>
+    </nav>
+
+    <div class="status-dock">
+      <div class="hw-mini" id="topHwMini">CPU --% · GPU --% · RAM --G</div>
+      <span class="pad-chip idle" id="topPadChip">KB / MOUSE</span>
+      <div class="user-chip" id="topUserChip" title="Open Quick Access Deck (Q / Y / △)">
+        <img id="topAvatar" src="" alt="PFP">
+        <strong id="topUserName">Player</strong>
+      </div>
+      <span class="clock-txt" id="topClock">12:00</span>
+    </div>
+  </header>
+
+  <div id="all-mode-banner">
+    <div><strong>⚠ ALL MODE ACTIVE (GTA V + GTA VI SIMULTANEOUS)</strong> — Experimental dual-title mount: may be buggy or use extra RAM/GPU. Both GTA V and GTA VI are unlocked below!</div>
+    <button class="v-btn gold" id="btnBannerDual" style="padding:6px 14px;font-size:12px;">⚡ LAUNCH BOTH (GTA V + VI)</button>
+  </div>
+
+  <main id="stage">
+    <!-- HOME VIEW -->
+    <section class="view-panel active" id="view-home">
+      <div class="hero-stage">
+        <div class="hero-info">
+          <div class="hero-tags" id="heroTags"></div>
+          <img class="hero-logo" id="heroLogo" src="" alt="" style="display:none;">
+          <h1 class="hero-title" id="heroTitle">Grand Theft Auto V</h1>
+          <p class="hero-desc" id="heroDesc"></p>
+          <div class="hero-actions" id="heroActions">
+            <button class="v-btn primary" id="btnHeroPlay">▶ PLAY GAME</button>
+            <button class="v-btn gold" id="btnHeroDual" style="display:none;">⚡ DUAL-LAUNCH GTA V + VI</button>
+            <button class="v-btn" id="btnHeroQuick">⚡ QUICK DECK</button>
+            <button class="v-btn" id="btnHeroSwitch">🔄 SWITCH CONSOLE</button>
+          </div>
+        </div>
+
+        <aside class="hero-side-card">
+          <div class="hsc-title">LIVE HYPERVISOR TELEMETRY</div>
+          <div class="hsc-row"><span>Windows CPU</span><strong id="sideCpu">0.0%</strong></div>
+          <div class="bar-track"><div class="bar-fill" id="sideCpuBar" style="width:0%"></div></div>
+          <div class="hsc-row"><span>Windows GPU 3D</span><strong id="sideGpu">0.0%</strong></div>
+          <div class="bar-track"><div class="bar-fill" id="sideGpuBar" style="width:0%"></div></div>
+          <div class="hsc-row"><span>System RAM</span><strong id="sideRam">-- / -- GB</strong></div>
+          <div class="hsc-row"><span>Look Sensitivity</span><strong id="sideSens">100%</strong></div>
+          <div class="hsc-row"><span>Motion Blur</span><strong id="sideMb">OFF</strong></div>
+          <div class="hsc-row"><span>Optimization</span><strong id="sideOpt">OFF</strong></div>
+        </aside>
+      </div>
+
+      <div class="carousel-wrap" id="carousel"></div>
+    </section>
+
+    <!-- LIBRARY VIEW -->
+    <section class="view-panel" id="view-library">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div>
+          <h2 style="margin:0;font-size:24px;">Installed &amp; Emulated Library</h2>
+          <div style="font-size:13px;color:var(--muted);" id="libSubtitle">Select any mounted title to play immediately.</div>
+        </div>
+        <button class="v-btn gold" id="btnLibAllToggle" style="padding:9px 16px;font-size:13px;">⚠ Toggle ALL Mode</button>
+      </div>
+      <div class="lib-grid" id="libGrid"></div>
+    </section>
+
+    <!-- SETTINGS VIEW -->
+    <section class="view-panel" id="view-settings">
+      <div class="settings-layout">
+        <aside class="set-sidebar" id="setSidebar"></aside>
+        <div class="set-pane" id="setPane"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="prompt-bar">
+    <div class="prompts" id="promptList"></div>
+    <div style="font-family:Consolas,monospace;font-size:11.5px;color:#7dd3fc;">ViceOS Neo · ViceBox X v2.4</div>
+  </footer>
+</div>
+
+<!-- ==================== QUICK ACCESS DECK ==================== -->
+<aside id="quick-deck">
+  <div class="qd-hdr">
+    <h3>⚡ QUICK ACCESS DECK</h3>
+    <button class="v-btn" id="btnCloseDeck" style="padding:6px 12px;font-size:12px;">✕ Close</button>
+  </div>
+  <div class="qd-body" id="qdBody"></div>
+</aside>
+
+<!-- ==================== MODAL & TOAST ==================== -->
+<div id="v-modal-bg">
+  <div class="v-modal">
+    <h3 id="mTitle">Notice</h3>
+    <div id="mBody"></div>
+    <div class="v-modal-acts" id="mActs"></div>
+  </div>
+</div>
+<div id="v-toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const AVATARS = [
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="%2300e5ff"/><stop offset="100%" stop-color="%23ff2e97"/></linearGradient></defs><rect width="120" height="120" rx="60" fill="url(%23a)"/><circle cx="60" cy="46" r="22" fill="%2305070e"/><path d="M22 108c6-24 22-34 38-34s32 10 38 34" fill="%2305070e"/></svg>',
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="%23ffb830"/><stop offset="100%" stop-color="%23ff2e97"/></linearGradient></defs><rect width="120" height="120" rx="60" fill="url(%23b)"/><polygon points="60,22 92,94 60,76 28,94" fill="%2305070e"/></svg>',
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="c" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="%2319db7a"/><stop offset="100%" stop-color="%2300e5ff"/></linearGradient></defs><rect width="120" height="120" rx="60" fill="url(%23c)"/><text x="60" y="76" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="52" fill="%2305070e">V</text></svg>'
+  ];
+
+  const GAMES = [
+    {
+      id: 'gta6', name: 'Grand Theft Auto VI', platform: 'RAGE 9 · LEONIDA',
+      thumb: '/vbx/img/gta6_thumb.jpg', hero: '/vbx/img/gta6_hero.jpg', logo: '/vbx/img/gta6_logo.png',
+      desc: 'Welcome back to Vice City and the State of Leonida. Unlocked in GTA VI Developer Mode or simultaneously alongside GTA V in ALL Mode (Experimental).'
+    },
+    {
+      id: 'gta5', name: 'Grand Theft Auto V', platform: 'VICEBOX X · RAGE',
+      thumb: '/vbx/img/gta5_thumb.jpg', hero: '/vbx/img/gta5_hero.jpg', logo: '/vbx/img/gta5_logo.png',
+      desc: 'Full playable Los Santos & Blaine County with Real Windows Hardware HUD, Cheat Trainer (F2 / L3+R3), Directional Motion Blur, and Customizable Look Sensitivity.'
+    },
+    {
+      id: 'cyberpunk', name: 'Cyberpunk 2077', platform: 'NEXT-GEN',
+      thumb: '/vbx/img/cyberpunk_thumb.jpg', hero: '/vbx/img/cyberpunk_hero.jpg', logo: '/vbx/img/cyberpunk_logo.png',
+      desc: 'Night City open-world action RPG. Catalog title (mount GTA V, GTA VI, or ALL Mode to play).'
+    },
+    {
+      id: 'spiderman2', name: "Marvel's Spider-Man 2", platform: 'PS5 EXCLUSIVE',
+      thumb: '/vbx/img/spiderman2_thumb.jpg', hero: '/vbx/img/spiderman2_hero.jpg', logo: '/vbx/img/spiderman2_logo.png',
+      desc: 'Swing across Marvel’s New York as Peter Parker and Miles Morales.'
+    },
+    {
+      id: 'rdr2', name: 'Red Dead Redemption 2', platform: 'ROCKSTAR GAMES',
+      thumb: '/vbx/img/rdr2_thumb.jpg', hero: '/vbx/img/rdr2_hero.jpg', logo: '/vbx/img/rdr2_logo.png',
+      desc: 'America, 1899. Arthur Morgan and the Van der Linde gang on the run across the frontier.'
+    },
+    {
+      id: 'gow', name: 'God of War Ragnarök', platform: 'PS5 STUDIO',
+      thumb: '/vbx/img/gow_thumb.jpg', hero: '/vbx/img/gow_hero.jpg', logo: '/vbx/img/gow_logo.png',
+      desc: 'Embark on a mythic journey for answers and allies before Ragnarök arrives.'
+    },
+    {
+      id: 'forza', name: 'Forza Horizon 5', platform: 'XBOX STUDIO',
+      thumb: '/vbx/img/forza_thumb.jpg', hero: '/vbx/img/forza_hero.jpg', logo: '/vbx/img/forza_logo.png',
+      desc: 'Explore vibrant open-world landscapes of Mexico in hundreds of the world’s greatest cars.'
+    },
+    {
+      id: 'eldenring', name: 'ELDEN RING', platform: 'FROMSOFTWARE',
+      thumb: '/vbx/img/eldenring_thumb.jpg', hero: '/vbx/img/eldenring_hero.jpg', logo: '/vbx/img/eldenring_logo.png',
+      desc: 'Rise, Tarnished, and be guided by grace to brandish the power of the Elden Ring.'
+    },
+    {
+      id: 'tlou2', name: 'The Last of Us Part II', platform: 'REMASTERED',
+      thumb: '/vbx/img/tlou2_thumb.jpg', hero: '/vbx/img/tlou2_hero.jpg', logo: '/vbx/img/tlou2_logo.png',
+      desc: 'Experience Ellie and Abby’s emotional journey remastered for next-gen hardware.'
+    },
+    {
+      id: 'halo', name: 'Halo Infinite', platform: 'XBOX STUDIO',
+      thumb: '/vbx/img/halo_thumb.jpg', hero: '/vbx/img/halo_hero.jpg', logo: '',
+      desc: 'Step inside the armor of humanity’s greatest hero on Zeta Halo.'
+    }
+  ];
+
+  const SET_CATS = [
+    { id: 'emulation', ico: '⚡', label: 'Emulation & ALL Mode' },
+    { id: 'display',   ico: '🎨', label: 'Display, Blur & Theme' },
+    { id: 'controls',  ico: '🎮', label: 'Controller & Sensitivity' },
+    { id: 'profile',   ico: '👤', label: 'Profile & Audio' },
+    { id: 'hardware',  ico: '🖥', label: 'Real Hardware & Consoles' }
+  ];
+
+  const st = {
+    bootDone: false,
+    view: 'home', // 'home' | 'library' | 'settings'
+    selectedIdx: 1,
+    emulatedGame: 'gta5', // 'gta5' | 'gta6' | 'all'
+    profileName: 'Player',
+    avatar: AVATARS[0],
+    theme: 'vice', // 'vice' | 'cyan' | 'gold' | 'green'
+    sfxOn: true,
+    use24h: false,
+    optimizationMode: false,
+    motionBlur: false,
+    motionBlurStrength: 55,
+    lookSensitivity: 100,
+    showDebugHud: true,
+    enableCheatMenu: true,
+    resIndex: 1,
+    isFoxxyDev: false,
+    devGta6Enabled: false,
+    devGta6ExePath: '',
+    gta5Url: '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1',
+    telemetry: { cpuPct: 0, gpuPct: 0, vramUsedMb: 0, ramUsedGb: 0, ramTotalGb: 16, gpuName: 'Direct3D GPU' },
+    // Navigation & overlays
+    homeZone: 'carousel', // 'carousel' | 'actions'
+    homeActIdx: 0,
+    libIdx: 0,
+    setCatIdx: 0,
+    setZone: 'sidebar', // 'sidebar' | 'pane'
+    setItemIdx: 0,
+    deckOpen: false,
+    deckIdx: 0,
+    modalOpen: false,
+    modalBtnIdx: 0,
+    modalActions: [],
+    padConnected: false,
+    padStyle: 'xbox' // 'ps' | 'xbox'
+  };
+
+  function isMounted(gameId) {
+    if (st.emulatedGame === 'all') return gameId === 'gta5' || gameId === 'gta6';
+    return gameId === st.emulatedGame;
+  }
+
+  // ==================== PROCEDURAL SYNTH UI AUDIO ====================
+  let actx = null;
+  function sfx(kind) {
+    if (!st.sfxOn) return;
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume().catch(() => {});
+      const t = actx.currentTime;
+      const playTone = (freq, endFreq, dur, gain, type) => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = type || 'sine';
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
+        g.gain.setValueAtTime(gain, t);
+        g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+        o.connect(g).connect(actx.destination);
+        o.start(t); o.stop(t + dur + 0.01);
+      };
+      if (kind === 'nav') playTone(460, 620, 0.055, 0.07, 'triangle');
+      else if (kind === 'ok') { playTone(523.25, 783.99, 0.11, 0.09, 'sine'); setTimeout(() => playTone(783.99, 1046.5, 0.12, 0.07, 'sine'), 45); }
+      else if (kind === 'back') playTone(420, 240, 0.08, 0.08, 'triangle');
+      else if (kind === 'boot') { [261.63, 329.63, 392.0, 523.25].forEach((f, i) => setTimeout(() => playTone(f, f * 1.02, 0.5, 0.06, 'sine'), i * 85)); }
+    } catch (e) {}
+  }
+
+  let toastTimer = null;
+  function showToast(msg, borderCol) {
+    const el = document.getElementById('v-toast');
+    el.textContent = msg;
+    el.style.borderColor = borderCol || 'var(--accent)';
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+  }
+
+  function saveLocal() {
+    try {
+      localStorage.setItem('vbx_viceos_prefs', JSON.stringify({
+        avatar: st.avatar, theme: st.theme, sfxOn: st.sfxOn, use24h: st.use24h
+      }));
+    } catch (e) {}
+  }
+  function loadLocal() {
+    try {
+      const p = JSON.parse(localStorage.getItem('vbx_viceos_prefs') || '{}');
+      if (p.avatar) st.avatar = p.avatar;
+      if (p.theme) st.theme = p.theme;
+      if (typeof p.sfxOn === 'boolean') st.sfxOn = p.sfxOn;
+      if (typeof p.use24h === 'boolean') st.use24h = p.use24h;
+    } catch (e) {}
+    applyTheme();
+  }
+  function applyTheme() {
+    document.body.classList.remove('theme-cyan', 'theme-gold', 'theme-green');
+    if (st.theme === 'cyan') document.body.classList.add('theme-cyan');
+    else if (st.theme === 'gold') document.body.classList.add('theme-gold');
+    else if (st.theme === 'green') document.body.classList.add('theme-green');
+  }
+
+  async function pushConfig(patch) {
+    Object.assign(st, patch);
+    syncTopChrome();
+    syncSideTelemetry();
+    try {
+      await fetch('/vbx/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
+    } catch (e) {}
+  }
+
+  async function switchConsole(target) {
+    sfx('ok');
+    showToast('Switching Console OS to ' + (target === 'ps5' ? 'PlayStation 5' : 'Xbox DashX360') + '...', '#00e5ff');
+    try {
+      await fetch('/vbx/api/switch-console', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consoleTarget: target })
+      });
+    } catch (e) {}
+    setTimeout(() => { window.location.href = target === 'ps5' ? '/ps5/' : '/xbox/'; }, 280);
+  }
+
+  function setEmulatedMode(mode) {
+    pushConfig({ emulatedGame: mode });
+    if (mode === 'all') {
+      showToast('⚠ ALL MODE enabled (GTA V + GTA VI simultaneous) — Experimental: may be buggy!', '#ffb830');
+    } else {
+      showToast('Mounted ' + mode.toUpperCase() + ' partition.', '#19db7a');
+    }
+    renderCarousel();
+    renderHero();
+    if (st.view === 'library') renderLibrary();
+    if (st.view === 'settings') renderSettingsPane();
+    if (st.deckOpen) renderQuickDeck();
+  }
+
+  // ==================== PLAY LAUNCHING (GTA V, GTA VI, AND ALL MODE DUAL!) ====================
+  function buildGta5Url(extra) {
+    const base = st.gta5Url || '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1';
+    const sep = base.includes('?') ? '&' : '?';
+    return base + sep
+      + 'vbx_console=viceos'
+      + '&vbx_hud=' + (st.showDebugHud ? '1' : '0')
+      + '&vbx_cheats=' + (st.enableCheatMenu ? '1' : '0')
+      + '&vbx_mblur=' + (st.motionBlur ? '1' : '0')
+      + '&vbx_mblur_str=' + st.motionBlurStrength
+      + '&vbx_opt=' + (st.optimizationMode ? '1' : '0')
+      + '&vbx_sens=' + st.lookSensitivity
+      + '&vbx_mode=' + encodeURIComponent(st.emulatedGame)
+      + (extra || '');
+  }
+
+  async function launchGta6(alsoOpenGta5) {
+    const hasCustom = st.isFoxxyDev && st.devGta6Enabled && !!st.devGta6ExePath;
+    if (hasCustom) {
+      showToast('Launching GTA VI Developer Target...', '#ffb830');
+      try {
+        const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
+        const d = await res.json();
+        if (d.ok) {
+          if (alsoOpenGta5) {
+            showToast('GTA VI launched! Now booting GTA V simultaneously (ALL Mode)...', '#ffb830');
+            setTimeout(() => { window.location.href = buildGta5Url(); }, 450);
+            return;
+          }
+          const extra = d.isExe
+            ? `<p style="color:#00e5ff;">Full-Screen Dev Overlay: <b>${d.devOverlay ? 'ACTIVE (F10 toggles)' : 'OFF'}</b> · Fake FPS Cap: <b>${d.fakeFps ? d.fakeFpsLimit + ' FPS MAX' : 'OFF'}</b></p>`
+            : '';
+          openModal('Grand Theft Auto VI — Launched',
+            `<p>Started custom GTA VI file:<br><code style="color:#7dd3fc;word-break:break-all;">${esc(d.exePath)}</code></p>${extra}` +
+            (st.emulatedGame === 'all' ? '<p style="color:#fde68a;"><b>ALL Mode:</b> You can also launch Grand Theft Auto V right now to run both simultaneously!</p>' : ''),
+            st.emulatedGame === 'all'
+              ? [
+                  { label: '▶ Launch GTA V Too', primary: true, fn: () => { closeModal(); window.location.href = buildGta5Url(); } },
+                  { label: 'Stay in ViceOS', primary: false, fn: closeModal }
+                ]
+              : [{ label: 'Continue', primary: true, fn: closeModal }]
+          );
+          return;
+        }
+      } catch (e) {}
+    }
+
+    // In ALL Mode without a custom Foxxy .exe, open the GTA VI Vice Test Sandbox preview so BOTH games launch!
+    if (st.emulatedGame === 'all') {
+      const gta6PreviewUrl = buildGta5Url('&mode=sandbox&map=env_test&vbx_title=gta6');
+      if (alsoOpenGta5) {
+        try { window.open(gta6PreviewUrl, '_blank'); } catch (e) {}
+        showToast('⚠ ALL MODE: Opened GTA VI Sandbox + launching GTA V (may be buggy)!', '#ffb830');
+        setTimeout(() => { window.location.href = buildGta5Url(); }, 400);
+      } else {
+        showToast('⚠ ALL MODE: Launching GTA VI Vice Test Sandbox (Experimental)...', '#ffb830');
+        setTimeout(() => { window.location.href = gta6PreviewUrl; }, 320);
+      }
+      return;
+    }
+
+    openModal('GTA VI Developer Target Needed',
+      '<p>Select a custom GTA VI file (.exe or any file) in the native <b>Foxxy Developer</b> tab, or switch to <b>ALL Mode</b> to preview both GTA V &amp; GTA VI simultaneously.</p>',
+      [
+        { label: 'Enable ALL Mode (Buggy)', primary: true, fn: () => { closeModal(); setEmulatedMode('all'); } },
+        { label: 'Close', primary: false, fn: closeModal }
+      ]
+    );
+  }
+
+  function launchGame(game) {
+    if (!game) return;
+    if (!isMounted(game.id)) {
+      sfx('back');
+      openModal(game.name + ' — Not Mounted',
+        `<p><b>${esc(game.name)}</b> is not currently mounted in ViceBox X.</p>` +
+        `<p>Active partition: <b>${st.emulatedGame.toUpperCase()}</b>. Mount <b>GTA V</b>, <b>GTA VI</b>, or enable <b>ALL Mode (GTA V + GTA VI · Might Be Buggy)</b> to play.</p>`,
+        [{ label: 'OK', primary: true, fn: closeModal }]
+      );
+      return;
+    }
+    sfx('ok');
+    if (game.id === 'gta5') {
+      showToast('Launching Grand Theft Auto V (ViceOS Neo)...', '#00e5ff');
+      setTimeout(() => { window.location.href = buildGta5Url(); }, 320);
+    } else if (game.id === 'gta6') {
+      launchGta6(false);
+    }
+  }
+
+  function esc(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ==================== RENDERING ====================
+  function syncTopChrome() {
+    document.getElementById('topUserName').textContent = st.profileName;
+    document.getElementById('topAvatar').src = st.avatar;
+    const chip = document.getElementById('topModeChip');
+    const banner = document.getElementById('all-mode-banner');
+    const dualBtn = document.getElementById('btnHeroDual');
+    if (st.emulatedGame === 'all') {
+      chip.textContent = '⚠ ALL MODE · GTA V + VI (BUGGY)';
+      chip.className = 'mode-chip all-warn';
+      banner.classList.add('show');
+      dualBtn.style.display = 'inline-flex';
+    } else if (st.emulatedGame === 'gta6') {
+      chip.textContent = 'GTA VI DEV MOUNTED';
+      chip.className = 'mode-chip';
+      banner.classList.remove('show');
+      dualBtn.style.display = 'none';
+    } else {
+      chip.textContent = 'GTA V MOUNTED';
+      chip.className = 'mode-chip';
+      banner.classList.remove('show');
+      dualBtn.style.display = 'none';
+    }
+  }
+
+  function syncSideTelemetry() {
+    const t = st.telemetry || {};
+    const cpu = Math.max(0, Math.min(100, t.cpuPct || 0));
+    const gpu = Math.max(0, Math.min(100, t.gpuPct || 0));
+    document.getElementById('topHwMini').textContent = `CPU ${cpu.toFixed(0)}% · GPU ${gpu.toFixed(0)}% · RAM ${(t.ramUsedGb || 0).toFixed(1)}G`;
+    document.getElementById('sideCpu').textContent = cpu.toFixed(1) + '%';
+    document.getElementById('sideCpuBar').style.width = cpu.toFixed(0) + '%';
+    document.getElementById('sideGpu').textContent = gpu.toFixed(1) + '%';
+    document.getElementById('sideGpuBar').style.width = gpu.toFixed(0) + '%';
+    document.getElementById('sideRam').textContent = `${(t.ramUsedGb || 0).toFixed(1)} / ${(t.ramTotalGb || 16).toFixed(0)} GB`;
+    document.getElementById('sideSens').textContent = st.lookSensitivity + '%';
+    document.getElementById('sideMb').textContent = st.motionBlur ? (st.motionBlurStrength + '%') : 'OFF';
+    document.getElementById('sideOpt').textContent = st.optimizationMode ? 'ON' : 'OFF';
+  }
+
+  function renderHero() {
+    const g = GAMES[st.selectedIdx] || GAMES[1];
+    document.getElementById('hero-bg').style.backgroundImage = `url('${g.hero}')`;
+    document.getElementById('heroTitle').textContent = g.name;
+    document.getElementById('heroDesc').textContent = g.desc;
+    const logo = document.getElementById('heroLogo');
+    if (g.logo) { logo.src = g.logo; logo.style.display = 'block'; } else { logo.style.display = 'none'; }
+
+    const mounted = isMounted(g.id);
+    const tags = document.getElementById('heroTags');
+    tags.innerHTML = `<span class="h-tag">${esc(g.platform)}</span>` +
+      (mounted
+        ? (st.emulatedGame === 'all'
+            ? '<span class="h-tag all">⚠ ALL MODE · DUAL-MOUNT READY</span>'
+            : '<span class="h-tag ready">● MOUNTED &amp; PLAYABLE</span>')
+        : '<span class="h-tag locked">CATALOG · NOT MOUNTED</span>') +
+      `<span class="h-tag">SENS ${st.lookSensitivity}%</span>`;
+
+    const playBtn = document.getElementById('btnHeroPlay');
+    playBtn.textContent = mounted ? ('▶ PLAY ' + (g.id === 'gta6' ? 'GTA VI' : 'GTA V')) : 'ⓘ GAME DETAILS';
+  }
+
+  function renderCarousel() {
+    const c = document.getElementById('carousel');
+    c.innerHTML = '';
+    GAMES.forEach((g, i) => {
+      const mounted = isMounted(g.id);
+      const tile = document.createElement('div');
+      tile.className = 'game-tile' + (i === st.selectedIdx ? ' selected' : '');
+      tile.innerHTML = `
+        <img src="${g.thumb}" alt="${esc(g.name)}">
+        ${mounted ? `<span class="tile-badge ${st.emulatedGame === 'all' ? 'all' : 'ready'}">${st.emulatedGame === 'all' ? 'ALL · READY' : 'PLAYABLE'}</span>` : ''}
+        <div class="tile-foot">${esc(g.name)}</div>
+      `;
+      tile.onclick = () => {
+        if (st.selectedIdx === i) { launchGame(g); }
+        else { st.selectedIdx = i; sfx('nav'); renderCarousel(); renderHero(); updateFocusRings(); }
+      };
+      c.appendChild(tile);
+    });
+    const sel = c.children[st.selectedIdx];
+    if (sel) sel.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderLibrary() {
+    const grid = document.getElementById('libGrid');
+    grid.innerHTML = '';
+    document.getElementById('libSubtitle').textContent =
+      st.emulatedGame === 'all'
+        ? '⚠ ALL Mode active (Experimental · Might be buggy): BOTH Grand Theft Auto V and Grand Theft Auto VI are playable.'
+        : 'Active mount: ' + st.emulatedGame.toUpperCase() + '. Toggle ALL Mode anytime to unlock both GTA V & GTA VI together.';
+    GAMES.forEach((g, i) => {
+      const mounted = isMounted(g.id);
+      const card = document.createElement('div');
+      card.className = 'lib-card';
+      card.dataset.idx = String(i);
+      card.innerHTML = `
+        <img src="${g.hero}" alt="${esc(g.name)}">
+        <div class="lib-card-body">
+          <div class="lib-card-title">${esc(g.name)}</div>
+          <div class="lib-card-sub" style="color:${mounted ? (st.emulatedGame === 'all' ? '#fde68a' : '#86efac') : '#94a3b8'};">
+            ${mounted ? (st.emulatedGame === 'all' ? '⚠ Playable (ALL Mode)' : '● Mounted & Playable') : g.platform}
+          </div>
+        </div>
+      `;
+      card.onclick = () => { st.libIdx = i; launchGame(g); };
+      grid.appendChild(card);
+    });
+    updateFocusRings();
+  }
+
+  function renderSettingsSidebar() {
+    const sb = document.getElementById('setSidebar');
+    sb.innerHTML = '';
+    SET_CATS.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.className = 'set-cat' + (i === st.setCatIdx ? ' active' : '');
+      b.innerHTML = `<span>${c.ico}</span><span>${c.label}</span>`;
+      b.onclick = () => {
+        st.setCatIdx = i; st.setItemIdx = 0; sfx('nav');
+        renderSettingsSidebar(); renderSettingsPane(); updateFocusRings();
+      };
+      sb.appendChild(b);
+    });
+  }
+
+  function renderSettingsPane() {
+    const pane = document.getElementById('setPane');
+    const cat = SET_CATS[st.setCatIdx] || SET_CATS[0];
+    if (cat.id === 'emulation') {
+      pane.innerHTML = `
+        <h2>Emulation Partition &amp; ALL Mode</h2>
+        <div class="sub">Choose whether to mount GTA V, GTA VI, or BOTH simultaneously in ALL Mode.</div>
+        <div class="warn-box">
+          <b>⚠ About ALL Mode (GTA V + GTA VI):</b><br>
+          ALL Mode unlocks access to <b>both Grand Theft Auto V and Grand Theft Auto VI at the same time</b> across ViceOS Neo, PS5, and Xbox UIs.
+          <b>Warning:</b> Running or switching both titles simultaneously is experimental and <b>might be buggy</b> or increase GPU/RAM usage.
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Active Emulation Mode</div><div class="desc">Live-switches mounted game partitions right now</div></div>
+          <select class="s-select" id="setModeSel">
+            <option value="gta5" ${st.emulatedGame === 'gta5' ? 'selected' : ''}>GTA V Only (Stable)</option>
+            <option value="gta6" ${st.emulatedGame === 'gta6' ? 'selected' : ''}>GTA VI Only (Dev)</option>
+            <option value="all"  ${st.emulatedGame === 'all'  ? 'selected' : ''}>ALL Mode — GTA V + GTA VI (Might Be Buggy)</option>
+          </select>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Launch Both Titles (ALL Mode Dual-Launch)</div><div class="desc">Starts GTA VI and boots GTA V at the same time</div></div>
+          <button class="v-btn gold" id="btnSetDual" style="padding:9px 16px;font-size:13px;">⚡ Launch Both</button>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Foxxy Developer GTA VI Target</div><div class="desc">${esc(st.devGta6ExePath || 'Not configured — set any .exe or file in the native Foxxy Developer tab')}</div></div>
+          <span style="color:${st.devGta6ExePath ? '#19db7a' : '#94a3b8'};font-weight:700;">${st.devGta6ExePath ? 'ARMED' : 'PREVIEW'}</span>
+        </div>
+      `;
+      pane.querySelector('#setModeSel').onchange = (e) => setEmulatedMode(e.target.value);
+      pane.querySelector('#btnSetDual').onclick = () => {
+        if (st.emulatedGame !== 'all') setEmulatedMode('all');
+        launchGta6(true);
+      };
+    } else if (cat.id === 'display') {
+      pane.innerHTML = `
+        <h2>Display, Motion Blur &amp; ViceOS Theme</h2>
+        <div class="sub">All GTA V graphics &amp; enhancement settings stay live-synced with the native launcher and in-game drawer.</div>
+        <div class="s-row">
+          <div><div class="lbl">ViceOS Accent Theme</div><div class="desc">Customize your ViceOS Neo neon palette</div></div>
+          <select class="s-select" id="setThemeSel">
+            <option value="vice"  ${st.theme === 'vice'  ? 'selected' : ''}>Vice Neon (Cyan + Magenta)</option>
+            <option value="cyan"  ${st.theme === 'cyan'  ? 'selected' : ''}>Cyber Cyan (Electric Blue)</option>
+            <option value="gold"  ${st.theme === 'gold'  ? 'selected' : ''}>Leonida Sunset (Gold + Amber)</option>
+            <option value="green" ${st.theme === 'green' ? 'selected' : ''}>Emerald Matrix (Hyper Green)</option>
+          </select>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Optimization Mode (Visual-Preserving)</div><div class="desc">Discrete GPU lock, HiDPI clamp &amp; PostFX/MSAA trim for higher FPS</div></div>
+          <input class="v-chk" type="checkbox" id="setOpt" ${st.optimizationMode ? 'checked' : ''}>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Directional GPU Motion Blur</div><div class="desc">Smooths camera pans, driving speed &amp; frame drops on WebGPU canvas</div></div>
+          <input class="v-chk" type="checkbox" id="setMb" ${st.motionBlur ? 'checked' : ''}>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Motion Blur Intensity (<span id="setMbVal">${st.motionBlurStrength}%</span>)</div><div class="desc">0% – 100% directional blur strength</div></div>
+          <input class="v-rng" type="range" id="setMbStr" min="0" max="100" step="5" value="${st.motionBlurStrength}">
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Real Hardware Debug HUD (F3)</div><div class="desc">Shows real Windows CPU %, GPU %, VRAM &amp; FPS over GTA V</div></div>
+          <input class="v-chk" type="checkbox" id="setHud" ${st.showDebugHud ? 'checked' : ''}>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">In-Game Cheat Menu Drawer (F2 / L3+R3)</div><div class="desc">Full GTA V trainer overlay inside gameplay</div></div>
+          <input class="v-chk" type="checkbox" id="setCheats" ${st.enableCheatMenu ? 'checked' : ''}>
+        </div>
+      `;
+      pane.querySelector('#setThemeSel').onchange = (e) => { st.theme = e.target.value; applyTheme(); saveLocal(); showToast('Theme updated!'); };
+      pane.querySelector('#setOpt').onchange = (e) => pushConfig({ optimizationMode: e.target.checked });
+      pane.querySelector('#setMb').onchange = (e) => pushConfig({ motionBlur: e.target.checked });
+      pane.querySelector('#setMbStr').oninput = (e) => { const v = parseInt(e.target.value, 10) || 0; pane.querySelector('#setMbVal').textContent = v + '%'; pushConfig({ motionBlurStrength: v }); };
+      pane.querySelector('#setHud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
+      pane.querySelector('#setCheats').onchange = (e) => pushConfig({ enableCheatMenu: e.target.checked });
+    } else if (cat.id === 'controls') {
+      const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+      pane.innerHTML = `
+        <h2>Controller &amp; GTA V Camera Sensitivity</h2>
+        <div class="sub">Full DualSense PS5, Xbox Series X|S / 360, Keyboard, and Mouse support in ViceOS Neo and GTA V.</div>
+        <div class="s-row">
+          <div><div class="lbl">Connected Controller</div><div class="desc">${esc(pads.length ? pads[0].id : 'No controller active — press any button on your gamepad')}</div></div>
+          <button class="v-btn" id="btnVibe" style="padding:8px 16px;font-size:13px;">Test Rumble</button>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">GTA V Look Sensitivity (<span id="setSensVal">${st.lookSensitivity}%</span>)</div><div class="desc">Scales both Mouse (Pointer Lock) &amp; Controller Right-Stick camera speed (20%–300%)</div></div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input class="v-rng" type="range" id="setSensRng" min="20" max="300" step="5" value="${st.lookSensitivity}">
+            <button class="v-btn" id="btnSens100" style="padding:6px 11px;font-size:12px;">100%</button>
+          </div>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">ViceOS Neo Controls</div><div class="desc">D-Pad/L-Stick Navigate · A/✕ Select · B/○ Back · LB/RB Tabs · Y/△ Quick Access Deck · Start/Options Settings</div></div>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">GTA V Gameplay Controls</div><div class="desc">L-Stick Move/Steer · R-Stick Look · R2/RT Shoot/Gas · L2/LT Aim/Brake · △/Y Enter Vehicle · L3+R3 Cheat Drawer · F6/F7 Live Sensitivity</div></div>
+        </div>
+      `;
+      pane.querySelector('#setSensRng').oninput = (e) => {
+        const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100));
+        pane.querySelector('#setSensVal').textContent = v + '%';
+        pushConfig({ lookSensitivity: v });
+      };
+      pane.querySelector('#btnSens100').onclick = () => {
+        pane.querySelector('#setSensRng').value = '100';
+        pane.querySelector('#setSensVal').textContent = '100%';
+        pushConfig({ lookSensitivity: 100 });
+        showToast('GTA V Sensitivity reset to 100%');
+      };
+      pane.querySelector('#btnVibe').onclick = () => {
+        const gp = navigator.getGamepads && Array.from(navigator.getGamepads()).find(Boolean);
+        if (gp && gp.vibrationActuator && gp.vibrationActuator.playEffect) {
+          gp.vibrationActuator.playEffect('dual-rumble', { duration: 280, strongMagnitude: 0.75, weakMagnitude: 0.55 });
+          showToast('Controller rumble pulse sent!', '#19db7a');
+        } else {
+          showToast('Connect a DualSense or Xbox controller to test rumble.', '#ffb830');
+        }
+      };
+    } else if (cat.id === 'profile') {
+      pane.innerHTML = `
+        <h2>Profile &amp; Audio</h2>
+        <div class="sub">Personalize your Gamertag, Avatar, UI SFX, and Clock format.</div>
+        <div class="s-row">
+          <div><div class="lbl">Gamertag / Profile Name</div><div class="desc">Synced with ViceBox X, PS5, and Xbox UIs</div></div>
+          <div style="display:flex;gap:8px;">
+            <input class="s-input" id="setNameInp" value="${esc(st.profileName)}" maxlength="32">
+            <button class="v-btn" id="btnSaveName" style="padding:8px 14px;font-size:13px;">Save</button>
+          </div>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">ViceOS Synth UI Sound Effects</div><div class="desc">Play procedural feedback chimes on navigation and selection</div></div>
+          <input class="v-chk" type="checkbox" id="setSfx" ${st.sfxOn ? 'checked' : ''}>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">24-Hour Clock</div><div class="desc">Display time in 24-hour format on the top dock</div></div>
+          <input class="v-chk" type="checkbox" id="set24h" ${st.use24h ? 'checked' : ''}>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Profile Avatar</div><div class="desc">Choose a ViceOS Neo avatar or upload any image</div></div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${AVATARS.map((a, idx) => `<button class="v-btn" data-av="${idx}" style="padding:3px;border-radius:50%;"><img src="${a}" style="width:36px;height:36px;border-radius:50%;display:block;"></button>`).join('')}
+            <label class="v-btn" style="padding:8px 12px;font-size:12px;">Upload<input type="file" id="setAvFile" accept="image/*" style="display:none;"></label>
+          </div>
+        </div>
+      `;
+      pane.querySelector('#setNameInp').onkeydown = (e) => e.stopPropagation();
+      pane.querySelector('#btnSaveName').onclick = () => {
+        const v = pane.querySelector('#setNameInp').value.trim();
+        if (v) { pushConfig({ profileName: v }); showToast('Profile name updated to ' + v); }
+      };
+      pane.querySelector('#setSfx').onchange = (e) => { st.sfxOn = e.target.checked; saveLocal(); };
+      pane.querySelector('#set24h').onchange = (e) => { st.use24h = e.target.checked; saveLocal(); updateClock(); };
+      pane.querySelectorAll('[data-av]').forEach(b => b.onclick = () => {
+        st.avatar = AVATARS[parseInt(b.dataset.av, 10)]; saveLocal(); syncTopChrome(); showToast('Avatar updated!');
+      });
+      pane.querySelector('#setAvFile').onchange = (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = () => { st.avatar = r.result; saveLocal(); syncTopChrome(); showToast('Custom avatar saved!'); };
+        r.readAsDataURL(f);
+      };
+    } else {
+      const t = st.telemetry || {};
+      pane.innerHTML = `
+        <h2>Real Windows Hardware &amp; Console Hot-Swap</h2>
+        <div class="sub">Switch live between ViceOS Neo, PlayStation 5, and Xbox DashX360 without restarting.</div>
+        <div class="s-row">
+          <div><div class="lbl">Active Windows GPU</div><div class="desc">${esc(t.gpuName || 'Direct3D Hardware GPU')}</div></div>
+          <strong style="color:var(--accent);font-family:Consolas,monospace;">${(t.gpuPct || 0).toFixed(1)}% · ${Math.round(t.vramUsedMb || 0)} MB VRAM</strong>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Windows CPU &amp; System RAM</div><div class="desc">Real-time PDH &amp; GlobalMemoryStatusEx telemetry</div></div>
+          <strong style="color:var(--green);font-family:Consolas,monospace;">CPU ${(t.cpuPct || 0).toFixed(1)}% · ${(t.ramUsedGb || 0).toFixed(1)}/${(t.ramTotalGb || 16).toFixed(0)} GB</strong>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Switch to PlayStation 5 UI</div><div class="desc">PS5_Online Home, Settings &amp; Jailbreak</div></div>
+          <button class="v-btn" id="btnSwPs5" style="padding:9px 16px;font-size:13px;">Switch to PS5 →</button>
+        </div>
+        <div class="s-row">
+          <div><div class="lbl">Switch to Xbox DashX360 UI</div><div class="desc">Metro &amp; Classic 360 Blades Dashboard</div></div>
+          <button class="v-btn" id="btnSwXbox" style="padding:9px 16px;font-size:13px;">Switch to Xbox →</button>
+        </div>
+      `;
+      pane.querySelector('#btnSwPs5').onclick = () => switchConsole('ps5');
+      pane.querySelector('#btnSwXbox').onclick = () => switchConsole('xbox');
+    }
+    updateFocusRings();
+  }
+
+  function renderQuickDeck() {
+    const b = document.getElementById('qdBody');
+    b.innerHTML = `
+      <div class="qd-card">
+        <div class="qd-row" style="margin-bottom:8px;">
+          <strong>Emulation Mode</strong>
+          <select class="s-select" id="qdMode" style="min-width:165px;padding:6px 8px;font-size:12px;">
+            <option value="gta5" ${st.emulatedGame === 'gta5' ? 'selected' : ''}>GTA V</option>
+            <option value="gta6" ${st.emulatedGame === 'gta6' ? 'selected' : ''}>GTA VI (Dev)</option>
+            <option value="all"  ${st.emulatedGame === 'all'  ? 'selected' : ''}>⚠ ALL (Buggy)</option>
+          </select>
+        </div>
+        <div style="font-size:11.5px;color:#fde68a;">ALL Mode mounts both GTA V &amp; GTA VI at the same time (experimental).</div>
+      </div>
+      <div class="qd-card">
+        <div class="qd-row" style="margin-bottom:6px;"><span>GTA V Look Sensitivity</span><strong id="qdSensVal" style="color:var(--accent);">${st.lookSensitivity}%</strong></div>
+        <input class="v-rng" id="qdSens" type="range" min="20" max="300" step="5" value="${st.lookSensitivity}" style="width:100%;">
+      </div>
+      <div class="qd-card">
+        <div class="qd-row" style="margin-bottom:8px;"><span>Directional Motion Blur</span><input class="v-chk" id="qdMb" type="checkbox" ${st.motionBlur ? 'checked' : ''}></div>
+        <div class="qd-row" style="margin-bottom:4px;"><span style="font-size:12px;color:var(--muted);">Blur Strength</span><strong id="qdMbVal">${st.motionBlurStrength}%</strong></div>
+        <input class="v-rng" id="qdMbStr" type="range" min="0" max="100" step="5" value="${st.motionBlurStrength}" style="width:100%;">
+      </div>
+      <div class="qd-card">
+        <div class="qd-row" style="margin-bottom:8px;"><span>Optimization Mode</span><input class="v-chk" id="qdOpt" type="checkbox" ${st.optimizationMode ? 'checked' : ''}></div>
+        <div class="qd-row" style="margin-bottom:8px;"><span>Real Hardware HUD (F3)</span><input class="v-chk" id="qdHud" type="checkbox" ${st.showDebugHud ? 'checked' : ''}></div>
+        <div class="qd-row"><span>In-Game Cheat Menu (F2)</span><input class="v-chk" id="qdCh" type="checkbox" ${st.enableCheatMenu ? 'checked' : ''}></div>
+      </div>
+      <div class="qd-card" style="display:flex;gap:8px;">
+        <button class="v-btn" id="qdPs5" style="flex:1;justify-content:center;padding:9px;font-size:12.5px;">PS5 UI</button>
+        <button class="v-btn" id="qdXbox" style="flex:1;justify-content:center;padding:9px;font-size:12.5px;">Xbox UI</button>
+      </div>
+    `;
+    b.querySelector('#qdMode').onchange = (e) => setEmulatedMode(e.target.value);
+    b.querySelector('#qdSens').oninput = (e) => { const v = Math.max(20, Math.min(300, parseInt(e.target.value, 10) || 100)); b.querySelector('#qdSensVal').textContent = v + '%'; pushConfig({ lookSensitivity: v }); };
+    b.querySelector('#qdMb').onchange = (e) => pushConfig({ motionBlur: e.target.checked });
+    b.querySelector('#qdMbStr').oninput = (e) => { const v = parseInt(e.target.value, 10) || 0; b.querySelector('#qdMbVal').textContent = v + '%'; pushConfig({ motionBlurStrength: v }); };
+    b.querySelector('#qdOpt').onchange = (e) => pushConfig({ optimizationMode: e.target.checked });
+    b.querySelector('#qdHud').onchange = (e) => pushConfig({ showDebugHud: e.target.checked });
+    b.querySelector('#qdCh').onchange = (e) => pushConfig({ enableCheatMenu: e.target.checked });
+    b.querySelector('#qdPs5').onclick = () => switchConsole('ps5');
+    b.querySelector('#qdXbox').onclick = () => switchConsole('xbox');
+    updateFocusRings();
+  }
+
+  function toggleDeck(force) {
+    st.deckOpen = force !== undefined ? !!force : !st.deckOpen;
+    document.getElementById('quick-deck').classList.toggle('open', st.deckOpen);
+    sfx(st.deckOpen ? 'ok' : 'back');
+    if (st.deckOpen) { st.deckIdx = 0; renderQuickDeck(); }
+    updateFocusRings();
+  }
+
+  function setView(v) {
+    st.view = v;
+    document.querySelectorAll('.nav-pill').forEach(p => p.classList.toggle('active', p.dataset.view === v));
+    document.querySelectorAll('.view-panel').forEach(p => p.classList.toggle('active', p.id === 'view-' + v));
+    sfx('nav');
+    if (v === 'library') renderLibrary();
+    if (v === 'settings') { renderSettingsSidebar(); renderSettingsPane(); }
+    updateFocusRings();
+  }
+
+  function openModal(title, html, actions) {
+    st.modalOpen = true;
+    st.modalBtnIdx = 0;
+    st.modalActions = actions || [{ label: 'OK', primary: true, fn: closeModal }];
+    document.getElementById('mTitle').textContent = title;
+    document.getElementById('mBody').innerHTML = html;
+    const acts = document.getElementById('mActs');
+    acts.innerHTML = '';
+    st.modalActions.forEach((a, i) => {
+      const b = document.createElement('button');
+      b.className = 'v-btn' + (a.primary ? ' primary' : '');
+      b.textContent = a.label;
+      b.onclick = () => a.fn();
+      acts.appendChild(b);
+    });
+    document.getElementById('v-modal-bg').classList.add('open');
+    updateFocusRings();
+  }
+
+  function closeModal() {
+    st.modalOpen = false;
+    document.getElementById('v-modal-bg').classList.remove('open');
+    updateFocusRings();
+  }
+
+  // ==================== UNIFIED CONTROLLER + KEYBOARD FOCUS ENGINE ====================
+  function getInteractive(container) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('button:not(:disabled), input:not([type="file"]):not([type="hidden"]), select')).filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && window.getComputedStyle(el).display !== 'none';
+    });
+  }
+
+  function updateFocusRings() {
+    document.querySelectorAll('.pad-focus').forEach(el => el.classList.remove('pad-focus'));
+    if (!st.bootDone) return;
+    if (st.modalOpen) {
+      const btns = getInteractive(document.getElementById('mActs'));
+      if (btns.length) {
+        st.modalBtnIdx = Math.max(0, Math.min(btns.length - 1, st.modalBtnIdx));
+        btns[st.modalBtnIdx].classList.add('pad-focus');
+      }
+      return;
+    }
+    if (st.deckOpen) {
+      const items = getInteractive(document.getElementById('qdBody'));
+      if (items.length) {
+        st.deckIdx = Math.max(0, Math.min(items.length - 1, st.deckIdx));
+        items[st.deckIdx].classList.add('pad-focus');
+        items[st.deckIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      return;
+    }
+    if (st.view === 'home') {
+      if (st.homeZone === 'actions') {
+        const acts = getInteractive(document.getElementById('heroActions'));
+        if (acts.length) {
+          st.homeActIdx = Math.max(0, Math.min(acts.length - 1, st.homeActIdx));
+          acts[st.homeActIdx].classList.add('pad-focus');
+        }
+      }
+    } else if (st.view === 'library') {
+      const cards = document.querySelectorAll('#libGrid .lib-card');
+      if (cards.length) {
+        st.libIdx = Math.max(0, Math.min(cards.length - 1, st.libIdx));
+        cards[st.libIdx].classList.add('pad-focus');
+        cards[st.libIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    } else if (st.view === 'settings') {
+      if (st.setZone === 'sidebar') {
+        const cats = document.querySelectorAll('#setSidebar .set-cat');
+        if (cats[st.setCatIdx]) cats[st.setCatIdx].classList.add('pad-focus');
+      } else {
+        const items = getInteractive(document.getElementById('setPane'));
+        if (items.length) {
+          st.setItemIdx = Math.max(0, Math.min(items.length - 1, st.setItemIdx));
+          items[st.setItemIdx].classList.add('pad-focus');
+          items[st.setItemIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }
+  }
+
+  function adjustControl(el, dir) {
+    if (!el) return false;
+    if (el.tagName === 'INPUT' && el.type === 'range') {
+      const min = parseFloat(el.min || '0'), max = parseFloat(el.max || '100'), step = parseFloat(el.step || '5');
+      el.value = String(Math.max(min, Math.min(max, parseFloat(el.value || '0') + dir * step)));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      sfx('nav');
+      return true;
+    }
+    if (el.tagName === 'SELECT') {
+      const len = el.options.length;
+      el.selectedIndex = (el.selectedIndex + dir + len) % len;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      sfx('nav');
+      return true;
+    }
+    if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+      el.checked = dir > 0;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      sfx('ok');
+      return true;
+    }
+    return false;
+  }
+
+  function activateControl(el) {
+    if (!el) return;
+    if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+      el.checked = !el.checked;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      sfx('ok');
+    } else if (el.tagName === 'SELECT') {
+      adjustControl(el, 1);
+    } else if (el.tagName === 'INPUT' && el.type === 'range') {
+      adjustControl(el, 1);
+    } else if (el.tagName === 'INPUT' && el.type === 'text') {
+      el.focus();
+    } else {
+      el.click();
+    }
+  }
+
+  function handleNavAction(action) {
+    if (!st.bootDone) { finishBoot(); return; }
+
+    if (st.modalOpen) {
+      const btns = getInteractive(document.getElementById('mActs'));
+      if (action === 'left' && btns.length) { st.modalBtnIdx = (st.modalBtnIdx - 1 + btns.length) % btns.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'right' && btns.length) { st.modalBtnIdx = (st.modalBtnIdx + 1) % btns.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'confirm' && btns[st.modalBtnIdx]) btns[st.modalBtnIdx].click();
+      else if (action === 'back') closeModal();
+      return;
+    }
+
+    if (action === 'deck') { toggleDeck(); return; }
+
+    if (st.deckOpen) {
+      const items = getInteractive(document.getElementById('qdBody'));
+      const cur = items[st.deckIdx];
+      if (action === 'back') { toggleDeck(false); return; }
+      if (action === 'down' && items.length) { st.deckIdx = (st.deckIdx + 1) % items.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'up' && items.length) { st.deckIdx = (st.deckIdx - 1 + items.length) % items.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'left') adjustControl(cur, -1);
+      else if (action === 'right') adjustControl(cur, 1);
+      else if (action === 'confirm') activateControl(cur);
+      return;
+    }
+
+    const views = ['home', 'library', 'settings'];
+    if (action === 'lb') { setView(views[(views.indexOf(st.view) - 1 + views.length) % views.length]); return; }
+    if (action === 'rb') { setView(views[(views.indexOf(st.view) + 1) % views.length]); return; }
+    if (action === 'options') { setView(st.view === 'settings' ? 'home' : 'settings'); return; }
+
+    if (st.view === 'home') {
+      if (st.homeZone === 'carousel') {
+        if (action === 'left') { st.selectedIdx = (st.selectedIdx - 1 + GAMES.length) % GAMES.length; sfx('nav'); renderCarousel(); renderHero(); }
+        else if (action === 'right') { st.selectedIdx = (st.selectedIdx + 1) % GAMES.length; sfx('nav'); renderCarousel(); renderHero(); }
+        else if (action === 'up') { st.homeZone = 'actions'; st.homeActIdx = 0; sfx('nav'); updateFocusRings(); }
+        else if (action === 'confirm') launchGame(GAMES[st.selectedIdx]);
+      } else {
+        const acts = getInteractive(document.getElementById('heroActions'));
+        if (action === 'down' || action === 'back') { st.homeZone = 'carousel'; sfx('nav'); updateFocusRings(); }
+        else if (action === 'left' && acts.length) { st.homeActIdx = (st.homeActIdx - 1 + acts.length) % acts.length; sfx('nav'); updateFocusRings(); }
+        else if (action === 'right' && acts.length) { st.homeActIdx = (st.homeActIdx + 1) % acts.length; sfx('nav'); updateFocusRings(); }
+        else if (action === 'confirm' && acts[st.homeActIdx]) acts[st.homeActIdx].click();
+      }
+    } else if (st.view === 'library') {
+      if (action === 'back') { setView('home'); return; }
+      if (action === 'left') { st.libIdx = (st.libIdx - 1 + GAMES.length) % GAMES.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'right') { st.libIdx = (st.libIdx + 1) % GAMES.length; sfx('nav'); updateFocusRings(); }
+      else if (action === 'up') { st.libIdx = Math.max(0, st.libIdx - 4); sfx('nav'); updateFocusRings(); }
+      else if (action === 'down') { st.libIdx = Math.min(GAMES.length - 1, st.libIdx + 4); sfx('nav'); updateFocusRings(); }
+      else if (action === 'confirm') launchGame(GAMES[st.libIdx]);
+    } else if (st.view === 'settings') {
+      if (st.setZone === 'sidebar') {
+        if (action === 'back') { setView('home'); return; }
+        if (action === 'down') { st.setCatIdx = (st.setCatIdx + 1) % SET_CATS.length; st.setItemIdx = 0; sfx('nav'); renderSettingsSidebar(); renderSettingsPane(); }
+        else if (action === 'up') { st.setCatIdx = (st.setCatIdx - 1 + SET_CATS.length) % SET_CATS.length; st.setItemIdx = 0; sfx('nav'); renderSettingsSidebar(); renderSettingsPane(); }
+        else if (action === 'right' || action === 'confirm') {
+          if (getInteractive(document.getElementById('setPane')).length) { st.setZone = 'pane'; st.setItemIdx = 0; sfx('nav'); updateFocusRings(); }
+        }
+      } else {
+        const items = getInteractive(document.getElementById('setPane'));
+        const cur = items[st.setItemIdx];
+        if (action === 'back') { st.setZone = 'sidebar'; sfx('back'); updateFocusRings(); }
+        else if (action === 'down' && items.length) { st.setItemIdx = (st.setItemIdx + 1) % items.length; sfx('nav'); updateFocusRings(); }
+        else if (action === 'up' && items.length) { st.setItemIdx = (st.setItemIdx - 1 + items.length) % items.length; sfx('nav'); updateFocusRings(); }
+        else if (action === 'left') { if (!adjustControl(cur, -1)) { st.setZone = 'sidebar'; sfx('back'); updateFocusRings(); } }
+        else if (action === 'right') adjustControl(cur, 1);
+        else if (action === 'confirm') activateControl(cur);
+      }
+    }
+  }
+
+  function updatePromptBar() {
+    const ps = st.padStyle === 'ps';
+    const ok = st.padConnected ? (ps ? '✕' : 'A') : 'Enter';
+    const bk = st.padConnected ? (ps ? '○' : 'B') : 'Esc';
+    const dk = st.padConnected ? (ps ? '△' : 'Y') : 'Q';
+    const tb = st.padConnected ? (ps ? 'L1 / R1' : 'LB / RB') : '[ / ]';
+    document.getElementById('promptList').innerHTML = `
+      <span><span class="p-key">${ok}</span>Select / Play</span>
+      <span><span class="p-key">${bk}</span>Back</span>
+      <span><span class="p-key">${dk}</span>Quick Deck</span>
+      <span><span class="p-key">${tb}</span>Switch Tab</span>
+    `;
+  }
+
+  // ==================== GAMEPAD LOOP ====================
+  const prevBtn = new Array(20).fill(false);
+  let lastNavT = 0;
+  function pollGamepad(now) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+    for (let i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { gp = pads[i]; break; }
+    const chip = document.getElementById('topPadChip');
+    if (!gp) {
+      if (st.padConnected) {
+        st.padConnected = false;
+        chip.textContent = 'KB / MOUSE'; chip.classList.add('idle');
+        updatePromptBar();
+      }
+      requestAnimationFrame(pollGamepad);
+      return;
+    }
+    if (!st.padConnected) {
+      st.padConnected = true;
+      const lid = gp.id.toLowerCase();
+      st.padStyle = (lid.includes('dualsense') || lid.includes('054c') || lid.includes('playstation') || lid.includes('wireless controller')) ? 'ps' : 'xbox';
+      chip.textContent = st.padStyle === 'ps' ? '🎮 DUALSENSE' : '🎮 XBOX PAD';
+      chip.classList.remove('idle');
+      updatePromptBar();
+      showToast((st.padStyle === 'ps' ? 'DualSense PS5' : 'Xbox') + ' Controller Paired to ViceOS Neo!', '#19db7a');
+    }
+
+    const b = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
+    const p = i => b(i) && !prevBtn[i];
+    const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
+
+    if (p(0)) handleNavAction('confirm');
+    else if (p(1)) handleNavAction('back');
+    else if (p(3)) handleNavAction('deck');
+    else if (p(4)) handleNavAction('lb');
+    else if (p(5)) handleNavAction('rb');
+    else if (p(9)) handleNavAction('options');
+    else if (p(16)) { toggleDeck(false); setView('home'); }
+
+    const rep = (now - lastNavT > 165);
+    if (rep) {
+      if (b(14) || lx < -0.58) { lastNavT = now; handleNavAction('left'); }
+      else if (b(15) || lx > 0.58) { lastNavT = now; handleNavAction('right'); }
+      else if (b(12) || ly < -0.58) { lastNavT = now; handleNavAction('up'); }
+      else if (b(13) || ly > 0.58) { lastNavT = now; handleNavAction('down'); }
+    }
+
+    for (let i = 0; i < Math.min(20, gp.buttons.length); i++) prevBtn[i] = b(i);
+    requestAnimationFrame(pollGamepad);
+  }
+
+  // ==================== KEYBOARD & MOUSE WIRING ====================
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' && e.target.type === 'text')) return;
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); handleNavAction('left'); }
+    else if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); handleNavAction('right'); }
+    else if (e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); handleNavAction('up'); }
+    else if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); handleNavAction('down'); }
+    else if (e.code === 'Enter' || e.code === 'Space') { e.preventDefault(); handleNavAction('confirm'); }
+    else if (e.code === 'Escape' || e.code === 'Backspace') { e.preventDefault(); handleNavAction('back'); }
+    else if (e.code === 'KeyQ' || e.code === 'Tab') { e.preventDefault(); handleNavAction('deck'); }
+    else if (e.code === 'BracketLeft') { e.preventDefault(); handleNavAction('lb'); }
+    else if (e.code === 'BracketRight') { e.preventDefault(); handleNavAction('rb'); }
+  });
+
+  document.getElementById('carousel').addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) > 4) {
+      e.preventDefault();
+      handleNavAction(e.deltaY > 0 ? 'right' : 'left');
+    }
+  }, { passive: false });
+
+  document.querySelectorAll('.nav-pill').forEach(p => p.onclick = () => setView(p.dataset.view));
+  document.getElementById('topUserChip').onclick = () => toggleDeck();
+  document.getElementById('btnCloseDeck').onclick = () => toggleDeck(false);
+  document.getElementById('btnHeroPlay').onclick = () => launchGame(GAMES[st.selectedIdx]);
+  document.getElementById('btnHeroDual').onclick = () => launchGta6(true);
+  document.getElementById('btnBannerDual').onclick = () => launchGta6(true);
+  document.getElementById('btnHeroQuick').onclick = () => toggleDeck(true);
+  document.getElementById('btnHeroSwitch').onclick = () => {
+    openModal('Switch Console Emulator OS', '<p>Hot-swap directly to another console dashboard while preserving all your settings and active emulation mode:</p>', [
+      { label: 'PlayStation 5 (PS5_Online)', primary: true, fn: () => switchConsole('ps5') },
+      { label: 'Xbox DashX360', primary: false, fn: () => switchConsole('xbox') },
+      { label: 'Stay in ViceOS Neo', primary: false, fn: closeModal }
+    ]);
+  };
+  document.getElementById('btnLibAllToggle').onclick = () => setEmulatedMode(st.emulatedGame === 'all' ? 'gta5' : 'all');
+
+  function updateClock() {
+    const d = new Date();
+    const h = st.use24h ? String(d.getHours()).padStart(2, '0') : String(d.getHours() % 12 || 12);
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const ap = st.use24h ? '' : (d.getHours() >= 12 ? ' PM' : ' AM');
+    document.getElementById('topClock').textContent = h + ':' + m + ap;
+  }
+
+  function finishBoot() {
+    if (st.bootDone) return;
+    st.bootDone = true;
+    document.getElementById('vice-boot').classList.add('done');
+    if (st.emulatedGame === 'all') {
+      setTimeout(() => showToast('⚠ ALL MODE active (GTA V + GTA VI simultaneous) — Experimental: may be buggy!', '#ffb830'), 420);
+    }
+    updateFocusRings();
+  }
+  document.getElementById('vice-boot').onclick = finishBoot;
+
+  async function init() {
+    loadLocal();
+    updateClock();
+    updatePromptBar();
+    setInterval(updateClock, 10000);
+
+    try {
+      const r = await fetch('/vbx/api/state', { cache: 'no-store' });
+      if (r.ok) {
+        const s = await r.json();
+        if (s.emulatedGame) st.emulatedGame = s.emulatedGame;
+        if (s.profileName) st.profileName = s.profileName;
+        if (typeof s.optimizationMode === 'boolean') st.optimizationMode = s.optimizationMode;
+        if (typeof s.motionBlur === 'boolean') st.motionBlur = s.motionBlur;
+        if (typeof s.motionBlurStrength === 'number') st.motionBlurStrength = s.motionBlurStrength;
+        if (typeof s.lookSensitivity === 'number') st.lookSensitivity = Math.max(20, Math.min(300, s.lookSensitivity));
+        if (typeof s.showDebugHud === 'boolean') st.showDebugHud = s.showDebugHud;
+        if (typeof s.enableCheatMenu === 'boolean') st.enableCheatMenu = s.enableCheatMenu;
+        if (typeof s.resIndex === 'number') st.resIndex = s.resIndex;
+        if (s.gta5Url) st.gta5Url = s.gta5Url;
+        st.isFoxxyDev = !!s.isFoxxyDev;
+        st.devGta6Enabled = !!s.devGta6Enabled;
+        st.devGta6ExePath = s.devGta6ExePath || '';
+      }
+    } catch (e) {}
+
+    st.selectedIdx = (st.emulatedGame === 'gta6') ? 0 : 1;
+    syncTopChrome();
+    renderCarousel();
+    renderHero();
+
+    // Smooth quick boot bar
+    let pct = 0;
+    const bootInt = setInterval(() => {
+      pct = Math.min(100, pct + 18);
+      document.getElementById('bootBar').style.width = pct + '%';
+      if (pct >= 100) { clearInterval(bootInt); setTimeout(finishBoot, 220); }
+    }, 180);
+    setTimeout(() => sfx('boot'), 150);
+
+    pollHw();
+    setInterval(pollHw, 1200);
+    requestAnimationFrame(pollGamepad);
+  }
+
+  async function pollHw() {
+    try {
+      const r = await fetch('/vbx/api/telemetry', { cache: 'no-store' });
+      if (r.ok) { st.telemetry = await r.json(); syncSideTelemetry(); }
+    } catch (e) {}
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

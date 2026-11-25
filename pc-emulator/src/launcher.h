@@ -81,7 +81,7 @@ inline const char* kShadowNames[]   = { "High", "Normal", "Low", "Off (Max FPS)"
 inline const int   kShadowVals[]    = { 2, 1, 0, -1 };
 inline const char* kGta5Modes[]     = { "TITLE MENU", "STORY MODE", "SANDBOX LS", "VICE TEST MAP" };
 inline const char* kViewportNames[] = { "Frameless Game Window (App Mode)", "Fullscreen Viewport", "System Default Browser" };
-inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)" };
+inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)", "ViceOS Neo (Custom Console UI)" };
 
 /**
  * Builds the local-proxy GTA V play path ("/play/?...") so the embedded server
@@ -367,7 +367,7 @@ inline void LoadConfig(EmulatorConfig& cfg) {
             else if (k == "renderDistance") cfg.renderDistance = std::stoi(v);
             else if (k == "gta5Mode") cfg.gta5Mode = std::stoi(v);
             else if (k == "viewportMode") cfg.viewportMode = std::stoi(v);
-            else if (k == "consoleTarget") cfg.consoleTarget = std::stoi(v);
+            else if (k == "consoleTarget") cfg.consoleTarget = std::max(0, std::min(2, std::stoi(v)));
             else if (k == "showDebugHud") cfg.showDebugHud = (std::stoi(v) != 0);
             else if (k == "enableCheatMenu") cfg.enableCheatMenu = (std::stoi(v) != 0);
             else if (k == "motionBlur") cfg.motionBlur = (std::stoi(v) != 0);

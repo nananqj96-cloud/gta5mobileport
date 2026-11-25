@@ -15,7 +15,9 @@
   // Read initial runtime flags from URL + sync live state with local C++ server
   const urlParams = new URLSearchParams(window.location.search);
   const vbxState = {
-    consoleTarget: urlParams.get('vbx_console') || 'ps5', // 'ps5' | 'xbox'
+    consoleTarget: urlParams.get('vbx_console') || 'ps5', // 'ps5' | 'xbox' | 'viceos'
+    emulatedGame: urlParams.get('vbx_mode') || 'gta5',    // 'gta5' | 'gta6' | 'all'
+    isGta6Sandbox: urlParams.get('vbx_title') === 'gta6',
     showDebugHud: urlParams.get('vbx_hud') !== '0',
     enableCheatMenu: urlParams.get('vbx_cheats') !== '0',
     motionBlur: urlParams.get('vbx_mblur') === '1',
@@ -393,6 +395,7 @@
       const s = await r.json();
       if (performance.now() - lastLocalConfigEditAt < 1500) return;
       if (typeof s.consoleTarget === 'string') vbxState.consoleTarget = s.consoleTarget;
+      if (typeof s.emulatedGame === 'string') vbxState.emulatedGame = s.emulatedGame;
       if (typeof s.showDebugHud === 'boolean') vbxState.showDebugHud = s.showDebugHud;
       if (typeof s.enableCheatMenu === 'boolean') vbxState.enableCheatMenu = s.enableCheatMenu;
       if (typeof s.motionBlur === 'boolean') vbxState.motionBlur = s.motionBlur;
@@ -847,8 +850,46 @@
     }
   }
 
+  function consoleLabelShort() {
+    if (vbxState.consoleTarget === 'viceos') return 'VICEOS';
+    if (vbxState.consoleTarget === 'xbox') return 'XBOX';
+    return 'PS5';
+  }
+
+  function consoleHudTitle() {
+    if (vbxState.consoleTarget === 'viceos') return 'VICEOS NEO · CUSTOM OS';
+    if (vbxState.consoleTarget === 'xbox') return 'XBOX SERIES X · NATIVE';
+    return 'PS5 PORT · XBOX→PS5';
+  }
+
   function returnToConsoleDashboard() {
+    if (vbxState.consoleTarget === 'viceos') { window.location.href = '/viceos/'; return; }
     window.location.href = (vbxState.consoleTarget === 'xbox') ? '/xbox/' : '/ps5/';
+  }
+
+  async function triggerAllModeSwap() {
+    if (vbxState.isGta6Sandbox) {
+      showToast('Switching to Grand Theft Auto V (ALL Mode)...', '#00e5ff');
+      const u = new URL(window.location.href);
+      u.searchParams.delete('map');
+      u.searchParams.delete('vbx_title');
+      window.location.href = u.toString();
+      return;
+    }
+    try {
+      const r = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
+      const d = await r.json();
+      if (d && d.ok) {
+        showToast('ALL Mode: Launched GTA VI alongside GTA V!', '#ffb830');
+        return;
+      }
+    } catch (e) {}
+    showToast('ALL Mode (Might Be Buggy): Switching to GTA VI Vice Sandbox...', '#ffb830');
+    const u = new URL(window.location.href);
+    u.searchParams.set('mode', 'sandbox');
+    u.searchParams.set('map', 'env_test');
+    u.searchParams.set('vbx_title', 'gta6');
+    window.location.href = u.toString();
   }
 
   // ==================== 7. UI: REAL HARDWARE DEBUG HUD + FULL CHEAT MENU ====================
@@ -1025,7 +1066,7 @@
           <button class="vbx-mini-btn" id="vbx-flip-pad">Switch</button>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button class="vbx-action-btn" id="vbx-back-dash">Return to ${vbxState.consoleTarget === 'xbox' ? 'Xbox' : 'PS5'} Dashboard (F9)</button>
+          <button class="vbx-action-btn" id="vbx-back-dash">Return to ${consoleLabelShort()} Dashboard (F9)</button>
         </div>
       `;
       body.querySelector('#vbx-opt-hud').onchange = (e) => {
@@ -1188,7 +1229,7 @@
     hudEl.innerHTML = `
       <div class="vbx-hud-top">
         <div>
-          <div class="vbx-hud-tag" id="vbx-hud-console">${vbxState.consoleTarget === 'xbox' ? 'XBOX SERIES X · NATIVE' : 'PS5 PORT · XBOX→PS5'}</div>
+          <div class="vbx-hud-tag" id="vbx-hud-console">${consoleHudTitle()}</div>
           <div style="font-size:10px;color:#94a3b8" id="vbx-hud-flags">REAL HARDWARE TELEMETRY</div>
         </div>
         <div class="vbx-hud-fps" id="vbx-hud-fps">-- FPS</div>
@@ -1210,7 +1251,8 @@
     fabEl.innerHTML = `
       <button class="vbx-pill-btn" id="vbx-btn-cheats">⚡ CHEATS (F2)</button>
       <button class="vbx-pill-btn" id="vbx-btn-hud">📊 HUD (F3)</button>
-      <button class="vbx-pill-btn" id="vbx-btn-home">🏠 ${vbxState.consoleTarget === 'xbox' ? 'XBOX' : 'PS5'} (F9)</button>
+      <button class="vbx-pill-btn" id="vbx-btn-allswap" style="display:${vbxState.emulatedGame === 'all' ? 'inline-block' : 'none'};border-color:#f59e0b;color:#fde68a;">🔀 ${vbxState.isGta6Sandbox ? 'GTA V' : 'GTA VI'} (ALL)</button>
+      <button class="vbx-pill-btn" id="vbx-btn-home">🏠 ${consoleLabelShort()} (F9)</button>
     `;
     document.body.appendChild(fabEl);
     fabEl.querySelector('#vbx-btn-cheats').onclick = () => toggleCheatDrawer();
@@ -1219,6 +1261,7 @@
       updateUiVisibility();
       pushConfigUpdate({ showDebugHud: vbxState.showDebugHud });
     };
+    fabEl.querySelector('#vbx-btn-allswap').onclick = () => triggerAllModeSwap();
     fabEl.querySelector('#vbx-btn-home').onclick = () => returnToConsoleDashboard();
 
     // Mobile-Parity Cheat Menu Drawer
@@ -1305,11 +1348,14 @@
     if (msEl) msEl.textContent = vbxState.frameMs.toFixed(1) + ' ms';
     if (flagsEl) {
       const f = [];
+      if (vbxState.emulatedGame === 'all') f.push('ALL-MODE');
       if (vbxState.optimizationMode) f.push('OPT:ON');
       if (vbxState.motionBlur) f.push('MBLUR:' + vbxState.motionBlurStrength + '%');
       if (vbxState.lookSensitivity !== 100) f.push('SENS:' + vbxState.lookSensitivity + '%');
       flagsEl.textContent = f.length ? f.join(' · ') : 'STANDARD RENDER';
     }
+    const swapBtn = document.getElementById('vbx-btn-allswap');
+    if (swapBtn) swapBtn.style.display = vbxState.emulatedGame === 'all' ? 'inline-block' : 'none';
     const bCpu = document.getElementById('vbx-bar-cpu');
     const bGpu = document.getElementById('vbx-bar-gpu');
     if (bCpu) bCpu.style.width = cpuPct.toFixed(0) + '%';
