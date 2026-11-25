@@ -1,0 +1,55 @@
+name: Build ViceBox X PC Emulator (.exe)
+
+on:
+  push:
+    branches: ["main", "arena/*"]
+    paths:
+      - "pc-emulator/**"
+      - ".github/workflows/build-pc-emulator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Visual Studio 2022 MSVC x64 toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build Standalone ViceBox-GTA6-Emulator.exe
+        shell: cmd
+        run: |
+          call pc-emulator\build-windows.bat
+
+      - name: Verify PE Headers & Zero Non-System DLL Dependencies
+        shell: cmd
+        run: |
+          dir releases\ViceBox-GTA6-Emulator.exe
+          dumpbin /headers releases\ViceBox-GTA6-Emulator.exe | findstr /I "machine subsystem"
+          dumpbin /dependents releases\ViceBox-GTA6-Emulator.exe
+
+      - name: Upload Windows EXE Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ViceBox-GTA6-Emulator-EXE
+          path: releases/ViceBox-GTA6-Emulator.exe
+
+      - name: Commit Built Standalone EXE to Current Branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f releases/ViceBox-GTA6-Emulator.exe
+          if ! git diff --cached --quiet; then
+            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe (MSVC x64) [skip ci]"
+            git push origin HEAD
+          fi

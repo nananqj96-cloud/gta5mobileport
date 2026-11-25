@@ -43,7 +43,17 @@ A lightweight, hardware-accelerated Android app branded as a PlayStation 5 mobil
 
 ## Building From Source
 
+### Android APK (`PS5-Mobile.apk`)
 ```bash
 chmod +x scripts/build-apk.sh
 ./scripts/build-apk.sh releases/PS5-Mobile.apk
 ```
+
+### PC Windows Executable (`VICEBOX X` — Dear ImGui + DirectX 11 `.exe`)
+- **Standalone Windows `.exe`:** [`releases/ViceBox-GTA6-Emulator.exe`](releases/ViceBox-GTA6-Emulator.exe) (64-bit native MSVC `/MT` build — zero external DLL dependencies)
+- **Built With:** C++17, Dear ImGui `v1.91.9b` (Win32 + DirectX 11), custom frameless Windows 11 glass chrome, GPU-rendered ambient aurora + interactive constellation particles, polyphonic WinMM console SFX synthesizer, Xbox Series X (Cyberleeks Build) operator sign-in flow, **GTA V Emulator** (active, launches `playgta5.com` cleanly in frameless `--app` viewport), and **GTA VI Emulator** (staged/disabled for Phase 2 runtime or custom texture pack integration).
+- **Local Windows Build (Visual Studio 2022 x64 Developer Command Prompt):**
+```bat
+pc-emulator\build-windows.bat
+```
+

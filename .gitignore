@@ -9,3 +9,4 @@ local.properties
 *.keystore
 .tmp_*
 *.idsig
+imgui.ini
