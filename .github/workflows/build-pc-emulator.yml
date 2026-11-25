@@ -25,6 +25,19 @@ jobs:
         with:
           arch: x64
 
+      - name: Download Microsoft Edge WebView2 Static SDK
+        shell: pwsh
+        run: |
+          $wvDir = "pc-emulator\third_party\webview2"
+          New-Item -ItemType Directory -Force -Path $wvDir | Out-Null
+          $nupkg = "$wvDir\webview2.zip"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2903.40" -OutFile $nupkg
+          Expand-Archive -Path $nupkg -DestinationPath "$wvDir\pkg" -Force
+          Copy-Item "$wvDir\pkg\build\native\include\WebView2.h" "$wvDir\WebView2.h"
+          Copy-Item "$wvDir\pkg\build\native\x64\WebView2LoaderStatic.lib" "$wvDir\WebView2LoaderStatic.lib"
+          Remove-Item -Recurse -Force "$wvDir\pkg", $nupkg
+          Get-ChildItem $wvDir
+
       - name: Build Standalone ViceBox-GTA6-Emulator.exe
         shell: pwsh
         run: |
@@ -58,7 +71,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f releases/ViceBox-GTA6-Emulator.exe
           if ! git diff --cached --quiet; then
-            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v2.2 (MSVC x64) [skip ci]"
+            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v2.5 (MSVC x64 + Embedded WebView2) [skip ci]"
             git pull --rebase origin "${{ github.ref_name }}"
             git push origin HEAD:"${{ github.ref_name }}"
           fi

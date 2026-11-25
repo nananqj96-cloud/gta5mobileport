@@ -5,6 +5,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <objbase.h>
 #include <dwmapi.h>
 #include <d3d11.h>
 #include <dxgi.h>
@@ -18,6 +19,7 @@
 #include "hw_monitor.h"
 #include "local_server.h"
 #include "launcher.h"
+#include "webview_host.h"
 #include "ui_draw.h"
 
 #include <algorithm>
@@ -60,6 +62,70 @@ static constexpr int kHeaderHeight = 54;
 static float g_NavLeftX = 300.0f;
 static float g_NavRightX = 820.0f;
 static float g_RightControlsMinX = 880.0f;
+
+// Embedded WebView2 Viewport Host & Borderless Fullscreen State
+static vicebox::EmbeddedViewportHost* g_ViewportHost = nullptr;
+static bool g_BorderlessFs = false;
+static WINDOWPLACEMENT g_PrevPlacement = { sizeof(WINDOWPLACEMENT) };
+
+static int ActiveViewportTopOffset() {
+    return g_BorderlessFs ? 0 : kHeaderHeight;
+}
+
+static void SyncViewportBounds() {
+    if (!g_ViewportHost || !g_hWnd) return;
+    RECT rc{};
+    if (GetClientRect(g_hWnd, &rc)) {
+        g_ViewportHost->Resize(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+    }
+}
+
+static void SetBorderlessFullscreen(HWND hWnd, bool enable) {
+    if (!hWnd || g_BorderlessFs == enable) return;
+    if (enable) {
+        g_PrevPlacement.length = sizeof(WINDOWPLACEMENT);
+        GetWindowPlacement(hWnd, &g_PrevPlacement);
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoW(MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+            g_BorderlessFs = true;
+            SetWindowLongW(hWnd, GWL_STYLE, WS_POPUP | WS_CLIPCHILDREN | WS_VISIBLE);
+            SetWindowPos(hWnd, HWND_TOP,
+                         mi.rcMonitor.left, mi.rcMonitor.top,
+                         mi.rcMonitor.right - mi.rcMonitor.left,
+                         mi.rcMonitor.bottom - mi.rcMonitor.top,
+                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        }
+    } else {
+        g_BorderlessFs = false;
+        SetWindowLongW(hWnd, GWL_STYLE,
+                       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CLIPCHILDREN | WS_VISIBLE);
+        SetWindowPlacement(hWnd, &g_PrevPlacement);
+        SetWindowPos(hWnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+    SyncViewportBounds();
+}
+
+static void ExpandWindowForViewport(HWND hWnd) {
+    if (!hWnd || g_BorderlessFs || IsZoomed(hWnd)) return;
+    RECT rc{};
+    if (!GetWindowRect(hWnd, &rc)) return;
+    int curW = rc.right - rc.left;
+    int curH = rc.bottom - rc.top;
+    if (curW >= 1280 && curH >= 760) return;
+
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), &mi)) return;
+    int workW = mi.rcWork.right - mi.rcWork.left;
+    int workH = mi.rcWork.bottom - mi.rcWork.top;
+    int newW = std::min(1380, std::max(curW, workW - 36));
+    int newH = std::min(840, std::max(curH, workH - 36));
+    int newX = mi.rcWork.left + (workW - newW) / 2;
+    int newY = mi.rcWork.top + (workH - newH) / 2;
+    SetWindowPos(hWnd, nullptr, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE);
+}
 
 static void CreateRenderTarget() {
     ID3D11Texture2D* pBackBuffer = nullptr;
@@ -162,6 +228,7 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
 
         case WM_NCHITTEST: {
+            if (g_BorderlessFs) return HTCLIENT;
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ScreenToClient(hWnd, &pt);
             RECT rc{};
@@ -196,10 +263,15 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return HTCLIENT;
         }
 
+        case WM_MOVE:
+            if (g_ViewportHost) g_ViewportHost->NotifyParentMoved();
+            return 0;
+
         case WM_SIZE:
             if (wParam == SIZE_MINIMIZED) return 0;
             g_ResizeWidth = static_cast<UINT>(LOWORD(lParam));
             g_ResizeHeight = static_cast<UINT>(HIWORD(lParam));
+            SyncViewportBounds();
             return 0;
 
         case WM_SYSCOMMAND:
@@ -464,8 +536,11 @@ static const char* GetConsoleTag(int target) {
 
 // ==================== TOP FRAMELESS GLASS HEADER ====================
 static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sfx,
-                            ParticleSystem& particles, SharedEmulatorState& shared, std::mutex& sharedMu,
+                            ParticleSystem& particles, LocalHttpServer& server,
+                            SharedEmulatorState& shared, std::mutex& sharedMu,
+                            EmbeddedViewportHost& viewportHost,
                             float winW, float dt, float time) {
+    if (g_BorderlessFs) return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 p0(0, 0), p1(winW, static_cast<float>(kHeaderHeight));
 
@@ -485,11 +560,98 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                "PS5 · XBOX · VICEOS  //  v2.4");
+                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.5"
+                                         : "PS5 · XBOX · VICEOS  //  v2.5");
     ImGui::PopFont();
 
-    // Center Navigation Tabs (compact widths so DEVELOPER NEVER overlaps on any screen!)
-    if (app.screen == AppScreen::Dashboard && app.dashFade > 0.05f) {
+    // Center Controls: LIVE EMBEDDED VIEWPORT TOOLBAR when game/console is active inside window,
+    // otherwise Dashboard Navigation Tabs!
+    if (app.screen == AppScreen::Dashboard && viewportHost.IsVisible()) {
+        struct VpBtn { const char* id; const char* lbl; float w; ImVec4 col; int action; };
+        const VpBtn btns[7] = {
+            { "##vp_back",   "< LAUNCHER", 98.0f, Palette::TextMid,  0 },
+            { "##vp_ps5",    "PS5",        52.0f, kPs5Blue,          1 },
+            { "##vp_xbox",   "XBOX",       58.0f, Palette::Emerald,  2 },
+            { "##vp_viceos", "VICEOS",     68.0f, Palette::Cyan,     3 },
+            { "##vp_gta5",   "GTA V",      64.0f, Palette::VicePink, 4 },
+            { "##vp_full",   "FULLSCREEN", 92.0f, kDevGold,          5 },
+            { "##vp_stop",   "STOP",       56.0f, ImVec4(0.95f, 0.24f, 0.34f, 1.0f), 6 }
+        };
+        float totalW = 0.0f;
+        for (int i = 0; i < 7; ++i) totalW += btns[i].w + (i > 0 ? 5.0f : 0.0f);
+        float startX = (winW - totalW) * 0.5f;
+        if (startX < 252.0f) startX = 252.0f;
+        g_NavLeftX = startX - 8.0f;
+        g_NavRightX = startX + totalW + 8.0f;
+
+        dl->AddRectFilled(ImVec2(startX - 6.0f, 9.0f), ImVec2(startX + totalW + 6.0f, 45.0f),
+                          IM_COL32(10, 15, 28, 224), 10.0f);
+        dl->AddRect(ImVec2(startX - 6.0f, 9.0f), ImVec2(startX + totalW + 6.0f, 45.0f),
+                    ColAlpha(Palette::Cyan, 0.22f), 10.0f);
+
+        float curX = startX;
+        ImGui::PushFont(fonts.mono);
+        for (int i = 0; i < 7; ++i) {
+            const auto& b = btns[i];
+            ImVec2 bp(curX, 13.0f);
+            ImGui::SetCursorPos(bp);
+            bool clicked = ImGui::InvisibleButton(b.id, ImVec2(b.w, 28.0f));
+            bool hov = ImGui::IsItemHovered();
+            bool isActiveConsole =
+                (b.action == 1 && app.config.consoleTarget == 0) ||
+                (b.action == 2 && app.config.consoleTarget == 1) ||
+                (b.action == 3 && app.config.consoleTarget == 2);
+            float bgAlpha = hov ? 0.34f : (isActiveConsole ? 0.22f : 0.11f);
+            float brdAlpha = hov ? 0.90f : (isActiveConsole ? 0.65f : 0.32f);
+            dl->AddRectFilled(bp, ImVec2(bp.x + b.w, bp.y + 28.0f),
+                              ColAlpha(ImVec4(b.col.x, b.col.y, b.col.z, bgAlpha), 1.0f), 7.0f);
+            dl->AddRect(bp, ImVec2(bp.x + b.w, bp.y + 28.0f),
+                        ColAlpha(b.col, brdAlpha), 7.0f, 0, isActiveConsole ? 1.4f : 1.0f);
+            ImVec2 ts = ImGui::CalcTextSize(b.lbl);
+            dl->AddText(ImVec2(bp.x + (b.w - ts.x) * 0.5f, bp.y + (28.0f - ts.y) * 0.5f),
+                        ColAlpha((hov || isActiveConsole || b.action >= 4) ? Palette::TextHi : Palette::TextMid, 1.0f),
+                        b.lbl);
+
+            if (clicked) {
+                sfx.Play(SfxId::Click, 0.70f);
+                if (b.action == 0) {
+                    viewportHost.Hide();
+                    app.ShowToast("Viewport paused in background — click RESUME GAME anytime", Palette::Cyan);
+                } else if (b.action >= 1 && b.action <= 3) {
+                    int newCt = b.action - 1;
+                    app.config.consoleTarget = newCt;
+                    SaveConfig(app.config);
+                    app.SyncToShared(shared, sharedMu);
+                    std::string u = server.BaseUrl() + GetConsoleRoute(newCt);
+                    RECT rc{}; GetClientRect(g_hWnd, &rc);
+                    viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+                    app.PushLog(std::string("[VIEWPORT] Live switched console to ") + GetConsoleTag(newCt));
+                } else if (b.action == 4) {
+                    app.SyncToShared(shared, sharedMu, "gta5");
+                    std::string u = server.BaseUrl() + "/play/?vbx_from=" +
+                        (app.config.consoleTarget == 2 ? "viceos" : (app.config.consoleTarget == 1 ? "xbox" : "ps5"));
+                    RECT rc{}; GetClientRect(g_hWnd, &rc);
+                    viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+                    app.PushLog("[VIEWPORT] Direct GTA V WebGPU launch inside embedded viewport -> " + u);
+                } else if (b.action == 5) {
+                    SetBorderlessFullscreen(g_hWnd, !g_BorderlessFs);
+                } else if (b.action == 6) {
+                    if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
+                    viewportHost.StopSession();
+                    app.PushLog("[VIEWPORT] Stopped embedded emulator viewport");
+                    app.ShowToast("Embedded Emulator Viewport stopped", Palette::TextMid);
+                }
+            }
+            if (hov) {
+                if (b.action == 0) ImGui::SetTooltip("Return to ViceBox X Launcher (keeps GTA V running)");
+                else if (b.action == 4) ImGui::SetTooltip("Boot Grand Theft Auto V directly inside this viewport");
+                else if (b.action == 5) ImGui::SetTooltip("Toggle Edge-to-Edge Fullscreen (F11)");
+                else if (b.action == 6) ImGui::SetTooltip("Close game & free viewport GPU/RAM");
+            }
+            curX += b.w + 5.0f;
+        }
+        ImGui::PopFont();
+    } else if (app.screen == AppScreen::Dashboard && app.dashFade > 0.05f) {
         const int numTabs = app.isFoxxyDev ? 4 : 3;
         const char* tabs[4] = { "EMULATORS", "CONFIG", "LOG", "DEVELOPER" };
         const float tabW[4] = { 102.0f, 82.0f, 64.0f, 112.0f };
@@ -653,6 +815,8 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         ImGui::SetCursorPos(badgePos);
         if (ImGui::InvisibleButton("##operator_pill", ImVec2(bw, 26.0f))) {
             sfx.Play(SfxId::TabSwitch, 0.80f);
+            if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
+            if (viewportHost.HasActiveSession()) viewportHost.StopSession();
             app.screen = AppScreen::Login;
             app.loginFade = 0.0f;
             app.passkeyBuf[0] = '\0';
@@ -665,6 +829,34 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Signed in as %s — click to switch account", app.signedInUser.c_str());
+        }
+
+        // If user stepped back to Launcher while a game/console session is still alive, offer 1-click RESUME!
+        if (!viewportHost.IsVisible() && viewportHost.HasActiveSession()) {
+            rightX -= 10.0f;
+            const char* resLbl = "RESUME GAME";
+            ImGui::PushFont(fonts.mono);
+            ImVec2 rTs = ImGui::CalcTextSize(resLbl);
+            float rW = rTs.x + 22.0f;
+            rightX -= rW;
+            ImVec2 rp(rightX, 13.0f);
+            ImGui::SetCursorPos(rp);
+            bool clickedRes = ImGui::InvisibleButton("##resume_vp_btn", ImVec2(rW, 28.0f));
+            bool rHov = ImGui::IsItemHovered();
+            float pulse = 0.65f + 0.35f * std::sin(time * 4.0f);
+            dl->AddRectFilled(rp, ImVec2(rp.x + rW, rp.y + 28.0f),
+                              ColAlpha(ImVec4(0.08f, 0.86f, 0.48f, rHov ? 0.38f : (0.20f + 0.08f * pulse)), 1.0f), 8.0f);
+            dl->AddRect(rp, ImVec2(rp.x + rW, rp.y + 28.0f),
+                        ColAlpha(Palette::Emerald, rHov ? 1.0f : (0.65f + 0.25f * pulse)), 8.0f, 0, 1.4f);
+            dl->AddText(ImVec2(rp.x + 11.0f, rp.y + (28.0f - rTs.y) * 0.5f),
+                        ColAlpha(Palette::TextHi, 1.0f), resLbl);
+            ImGui::PopFont();
+            if (clickedRes) {
+                sfx.Play(SfxId::Launch, 0.75f);
+                RECT rc{}; GetClientRect(g_hWnd, &rc);
+                viewportHost.Show(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+            }
+            if (rHov) ImGui::SetTooltip("Return to your live embedded Console / GTA V session");
         }
     }
 
@@ -1288,7 +1480,7 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         if (ImGui::Button(fbLbl, ImVec2(fbW, fbH))) {
             app.SyncToShared(shared, sharedMu, "gta5");
             std::string directUrl = server.BaseUrl() + GetConsoleRoute(ct);
-            LaunchGameViewport(directUrl, 2, false);
+            LaunchGameViewport(directUrl, 3, false);
             sfx.Play(SfxId::Launch, 0.85f);
             app.PushLog("[BROWSER] Opened direct console UI: " + directUrl);
             app.ShowToast("Opened " + directUrl + " in default browser!", activeConCol);
@@ -1426,7 +1618,7 @@ static void RenderConfigTab(AppState& app, const FontSet& fonts, SoundEngine& sf
         y += 20.0f;
         ImGui::SetCursorPos(ImVec2(x, y));
         ImGui::SetNextItemWidth(w);
-        if (ImGui::Combo("##vp_combo", &app.config.viewportMode, kViewportNames, 3)) {
+        if (ImGui::Combo("##vp_combo", &app.config.viewportMode, kViewportNames, 4)) {
             changed = true;
             sfx.Play(SfxId::Click, 0.60f);
         }
@@ -1827,19 +2019,42 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
 
 // ==================== CONSOLE HYPERVISOR LAUNCH OVERLAY ====================
 static void RenderLaunchOverlay(AppState& app, const FontSet& fonts, SoundEngine& sfx,
-                                ParticleSystem& particles, float winW, float winH, float dt, float time) {
+                                ParticleSystem& particles, EmbeddedViewportHost& viewportHost,
+                                float winW, float winH, float dt, float time) {
     app.launchOverlayAlpha = ExpLerp(app.launchOverlayAlpha, app.launching ? 1.0f : 0.0f, 10.0f, dt);
     if (app.launchOverlayAlpha < 0.01f) return;
 
     if (app.launching) {
-        app.launchProgress += dt * 0.72f;
+        const bool useEmbedded = (app.config.viewportMode <= 1) && viewportHost.IsSupportedBuild();
+        app.launchProgress += dt * (useEmbedded ? 1.25f : 0.72f);
         if (app.launchProgress >= 1.0f && !app.launchDispatched) {
             app.launchDispatched = true;
+            particles.EmitBurst(ImVec2(winW * 0.5f, winH * 0.5f), 26, app.launchAccent, Palette::Cyan);
+            sfx.Play(SfxId::LoginSuccess, 0.75f);
+
+            if (useEmbedded) {
+                ExpandWindowForViewport(g_hWnd);
+                if (app.config.viewportMode == 1) {
+                    SetBorderlessFullscreen(g_hWnd, true);
+                }
+                RECT rc{};
+                GetClientRect(g_hWnd, &rc);
+                bool ok = viewportHost.OpenUrl(app.launchTargetUrl, ActiveViewportTopOffset(),
+                                               rc.right - rc.left, rc.bottom - rc.top);
+                if (ok) {
+                    app.launchViewportStatus = "Embedded ViceBox X Viewport (WebView2)";
+                    app.PushLog("[VIEWPORT] Mounted INSIDE ViceBox X emulator viewport -> " + app.launchTargetUrl);
+                    app.launching = false;
+                    app.launchOverlayAlpha = 0.0f;
+                    app.ShowToast("Running INSIDE ViceBox X Viewport (F11 for Fullscreen)", app.launchAccent);
+                    return;
+                }
+            }
+
+            // Fallback / User-selected External Window Mode
             app.launchViewportStatus = LaunchGameViewport(
                 app.launchTargetUrl, app.config.viewportMode, app.config.optimizationMode);
             app.PushLog("[VIEWPORT] Launched via " + app.launchViewportStatus);
-            particles.EmitBurst(ImVec2(winW * 0.5f, winH * 0.5f), 26, app.launchAccent, Palette::Cyan);
-            sfx.Play(SfxId::LoginSuccess, 0.75f);
         }
         if (app.launchProgress >= 1.75f) {
             app.launching = false;
@@ -1865,10 +2080,12 @@ static void RenderLaunchOverlay(AppState& app, const FontSet& fonts, SoundEngine
     dl->AddText(ImVec2(c0.x + (bw - tSz.x) * 0.5f, c0.y + 144.0f), ColAlpha(Palette::TextHi, a), title);
     ImGui::PopFont();
 
+    const bool useEmbedded = (app.config.viewportMode <= 1) && viewportHost.IsSupportedBuild();
     const char* stage = (p < 0.35f) ? app.launchSubtitle.c_str()
                       : (p < 0.72f) ? "Syncing Local COOP/COEP Proxy & PC Enhancement Layer..."
-                      : (p < 0.99f) ? "Handing Off Frameless WebGPU Console Viewport..."
-                                    : "Console UI Open — Keep ViceBox X running in background!";
+                      : (p < 0.99f) ? (useEmbedded ? "Mounting Embedded WebGPU Emulator Viewport..."
+                                                   : "Handing Off External WebGPU Console Viewport...")
+                                    : "Console Viewport Active!";
     ImGui::PushFont(fonts.mono);
     ImVec2 sSz = ImGui::CalcTextSize(stage);
     dl->AddText(ImVec2(c0.x + (bw - sSz.x) * 0.5f, c0.y + 178.0f), ColAlpha(app.launchAccent, 0.94f * a), stage);
@@ -1909,6 +2126,7 @@ static void RenderToast(AppState& app, float winW, float winH, float dt) {
 
 // ==================== WIN32 ENTRY POINT ====================
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     ImGui_ImplWin32_EnableDpiAwareness();
 
     WNDCLASSEXW wc{};
@@ -1934,12 +2152,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     g_hWnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         wc.lpszClassName,
-        L"VICEBOX X — PS5 & Xbox PC Emulator [GTA V + GTA VI Cyberleeks Build]",
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU,
+        L"VICEBOX X v2.5 — Embedded Console & GTA V PC Emulator",
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CLIPCHILDREN,
         posX, posY, winW, winH,
         nullptr, nullptr, hInstance, nullptr);
 
-    if (!g_hWnd) return 1;
+    if (!g_hWnd) {
+        if (SUCCEEDED(comHr)) CoUninitialize();
+        return 1;
+    }
 
     BOOL darkMode = TRUE;
     DwmSetWindowAttribute(g_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
@@ -1982,6 +2203,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     bool serverOk = httpServer.Start(&hwMonitor, &sharedState, &sharedMu, &devCtrl);
     app.serverPort = httpServer.Port();
 
+    // Initialize Embedded Microsoft Edge WebView2 Viewport Host (renders consoles + GTA V inside ViceBox X!)
+    EmbeddedViewportHost viewportHost;
+    g_ViewportHost = &viewportHost;
+    viewportHost.Init(g_hWnd, GetEmbeddedWebViewDir(), app.config.optimizationMode);
+    viewportHost.SetCallbacks(
+        [&](bool enterFs) {
+            SetBorderlessFullscreen(g_hWnd, enterFs);
+        },
+        [&](const std::string& url) {
+            if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
+            viewportHost.StopSession();
+            std::string via = LaunchGameViewport(url, 2, app.config.optimizationMode);
+            app.PushLog("[VIEWPORT] WebView2 unavailable — opened external window via " + via);
+            app.ShowToast("WebView2 runtime missing — opened in external window", kDevGold);
+        },
+        [&](const std::string& msg) {
+            app.PushLog(msg);
+        });
+
     ShowWindow(g_hWnd, SW_SHOWDEFAULT);
     UpdateWindow(g_hWnd);
 
@@ -2005,12 +2245,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ParticleSystem particles;
     particles.Init(static_cast<float>(winW), static_cast<float>(winH));
 
-    app.PushLog("[HYPERVISOR] ViceBox X v2.4 initialized (ALL Mode Dual-Title + ViceOS Neo Custom Console + Full Dev Suite)");
+    app.PushLog("[HYPERVISOR] ViceBox X v2.5 initialized (Embedded WebGPU Emulator Viewport + ALL Mode + ViceOS Neo)");
+    app.PushLog(viewportHost.IsSupportedBuild()
+                    ? "[VIEWPORT] Embedded Edge WebView2 Host compiled in (zero external DLLs, static loader)"
+                    : "[VIEWPORT] WebView2 SDK not present in build — using external frameless window fallback");
     app.PushLog("[D3D11] Active GPU: " + app.hw.gpuName);
     app.PushLog("[HWMON] Real Windows CPU/GPU/VRAM/RAM telemetry monitor started");
     if (serverOk) {
         app.PushLog("[HTTP] Embedded console & GTA V COOP/COEP proxy active at " + httpServer.BaseUrl());
-        app.PushLog("[ASSETS] Mounted PS5_Online UI, DashX360 Metro+Blades, GTA 6 Updates & 29 game artworks");
+        app.PushLog("[ASSETS] Mounted PS5_Online UI, DashX360 Metro+Blades, ViceOS Neo, GTA 6 Updates & 29 game artworks");
     } else {
         app.PushLog("[HTTP] ERROR: Failed to start local server on 127.0.0.1");
     }
@@ -2018,6 +2261,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     auto prevClock = std::chrono::steady_clock::now();
     float elapsedTime = 0.0f;
     float hwPollAcc = 0.0f;
+    bool prevF11Down = false;
     bool running = true;
 
     while (running) {
@@ -2034,7 +2278,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
             g_ResizeWidth = g_ResizeHeight = 0;
             CreateRenderTarget();
+            SyncViewportBounds();
         }
+
+        // Edge-triggered F11 fullscreen toggle even while WebView2 child viewport holds focus!
+        bool f11Down = ((GetAsyncKeyState(VK_F11) & 0x8000) != 0);
+        if (f11Down && !prevF11Down && viewportHost.IsVisible() && GetForegroundWindow() == g_hWnd) {
+            SetBorderlessFullscreen(g_hWnd, !g_BorderlessFs);
+        }
+        prevF11Down = f11Down;
 
         auto nowClock = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(nowClock - prevClock).count();
@@ -2042,7 +2294,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         dt = std::clamp(dt, 0.001f, 0.05f);
         elapsedTime += dt;
 
-        // Pull live real PC hardware metrics & any config edits made inside PS5/Xbox UI
+        // Pull live real PC hardware metrics & any config edits made inside PS5/Xbox/ViceOS UI
         hwPollAcc += dt;
         if (hwPollAcc >= 0.45f) {
             hwPollAcc = 0.0f;
@@ -2056,7 +2308,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
         const ImVec2 disp = io.DisplaySize;
 
-        particles.UpdateAndRender(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), disp, io.MousePos, dt, elapsedTime);
+        if (!viewportHost.IsVisible()) {
+            particles.UpdateAndRender(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), disp, io.MousePos, dt, elapsedTime);
+        }
 
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(disp);
@@ -2065,9 +2319,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-        RenderHeaderBar(app, fonts, sfx, particles, sharedState, sharedMu, disp.x, dt, elapsedTime);
+        RenderHeaderBar(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, viewportHost,
+                        disp.x, dt, elapsedTime);
 
-        if (app.screen == AppScreen::Login) {
+        if (viewportHost.IsVisible()) {
+            // While WebView2 finishes spinning up (~200ms cold start), show a clean centered loader!
+            if (!viewportHost.IsReady()) {
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                float vpTop = static_cast<float>(ActiveViewportTopOffset());
+                float vpH = std::max(100.0f, disp.y - vpTop);
+                ImVec2 center(disp.x * 0.5f, vpTop + vpH * 0.5f - 18.0f);
+                DrawSpinnerRing(dl, center, 34.0f, 4.0f, elapsedTime,
+                                GetConsoleAccent(app.config.consoleTarget), Palette::Cyan, 1.0f);
+                ImGui::PushFont(fonts.subtitle);
+                const char* ldTitle = "INITIALIZING EMBEDDED WEBGPU VIEWPORT...";
+                ImVec2 ts = ImGui::CalcTextSize(ldTitle);
+                dl->AddText(ImVec2(center.x - ts.x * 0.5f, center.y + 52.0f),
+                            ColAlpha(Palette::TextHi, 0.96f), ldTitle);
+                ImGui::PopFont();
+                ImGui::PushFont(fonts.mono);
+                const char* ldSub = "Microsoft Edge WebView2 · COOP/COEP + WebGPU + Gamepad + Pointer Lock";
+                ImVec2 ss = ImGui::CalcTextSize(ldSub);
+                dl->AddText(ImVec2(center.x - ss.x * 0.5f, center.y + 84.0f),
+                            ColAlpha(Palette::Cyan, 0.86f), ldSub);
+                ImGui::PopFont();
+            }
+        } else if (app.screen == AppScreen::Login) {
             RenderLoginScreen(app, fonts, sfx, particles, sharedState, sharedMu, disp.x, disp.y, dt, elapsedTime);
         } else {
             app.dashFade = ExpLerp(app.dashFade, 1.0f, 7.5f, dt);
@@ -2087,14 +2364,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             }
         }
 
-        ImGui::GetForegroundDrawList()->AddRect(
-            ImVec2(0.5f, 0.5f), ImVec2(disp.x - 0.5f, disp.y - 0.5f),
-            IM_COL32(255, 255, 255, 24), 8.0f, 0, 1.0f);
+        if (!g_BorderlessFs) {
+            ImGui::GetForegroundDrawList()->AddRect(
+                ImVec2(0.5f, 0.5f), ImVec2(disp.x - 0.5f, disp.y - 0.5f),
+                IM_COL32(255, 255, 255, 24), 8.0f, 0, 1.0f);
+        }
 
         ImGui::End();
 
-        RenderLaunchOverlay(app, fonts, sfx, particles, disp.x, disp.y, dt, elapsedTime);
-        RenderToast(app, disp.x, disp.y, dt);
+        RenderLaunchOverlay(app, fonts, sfx, particles, viewportHost, disp.x, disp.y, dt, elapsedTime);
+        if (!viewportHost.IsVisible()) {
+            RenderToast(app, disp.x, disp.y, dt);
+        }
 
         ImGui::Render();
         const float clearColor[4] = { 0.024f, 0.035f, 0.063f, 1.0f };
@@ -2104,6 +2385,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         g_pSwapChain->Present(1, 0);
     }
 
+    viewportHost.Shutdown();
+    g_ViewportHost = nullptr;
     httpServer.Stop();
     devCtrl.Shutdown();
     hwMonitor.Shutdown();
@@ -2114,5 +2397,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     CleanupDeviceD3D();
     DestroyWindow(g_hWnd);
     UnregisterClassW(wc.lpszClassName, hInstance);
+    if (SUCCEEDED(comHr)) CoUninitialize();
     return 0;
 }

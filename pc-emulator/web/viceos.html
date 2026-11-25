@@ -771,15 +771,14 @@
       } catch (e) {}
     }
 
-    // In ALL Mode without a custom Foxxy .exe, open the GTA VI Vice Test Sandbox preview so BOTH games launch!
+    // In ALL Mode without a custom Foxxy .exe, stay 100% INSIDE the emulator viewport (never open a new window!)
     if (st.emulatedGame === 'all') {
       const gta6PreviewUrl = buildGta5Url('&mode=sandbox&map=env_test&vbx_title=gta6');
       if (alsoOpenGta5) {
-        try { window.open(gta6PreviewUrl, '_blank'); } catch (e) {}
-        showToast('⚠ ALL MODE: Opened GTA VI Sandbox + launching GTA V (may be buggy)!', '#ffb830');
-        setTimeout(() => { window.location.href = buildGta5Url(); }, 400);
+        showToast('⚠ ALL MODE: Launching GTA V inside viewport (use 🔀 GTA VI button anytime to swap)!', '#ffb830');
+        setTimeout(() => { window.location.href = buildGta5Url(); }, 350);
       } else {
-        showToast('⚠ ALL MODE: Launching GTA VI Vice Test Sandbox (Experimental)...', '#ffb830');
+        showToast('⚠ ALL MODE: Launching GTA VI Vice Test Sandbox inside viewport...', '#ffb830');
         setTimeout(() => { window.location.href = gta6PreviewUrl; }, 320);
       }
       return;

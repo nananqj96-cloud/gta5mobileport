@@ -80,7 +80,12 @@ inline const int   kFpsValues[]     = { 0, 60, 30 };
 inline const char* kShadowNames[]   = { "High", "Normal", "Low", "Off (Max FPS)" };
 inline const int   kShadowVals[]    = { 2, 1, 0, -1 };
 inline const char* kGta5Modes[]     = { "TITLE MENU", "STORY MODE", "SANDBOX LS", "VICE TEST MAP" };
-inline const char* kViewportNames[] = { "Frameless Game Window (App Mode)", "Fullscreen Viewport", "System Default Browser" };
+inline const char* kViewportNames[] = {
+    "Embedded Inside Emulator Viewport (Default)",
+    "Embedded Fullscreen Viewport",
+    "External Frameless Window (Edge/Chrome)",
+    "System Default Browser"
+};
 inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)", "ViceOS Neo (Custom Console UI)" };
 
 /**
@@ -236,6 +241,18 @@ inline std::wstring GetViewportProfileDir() {
     return L"";
 }
 
+inline std::wstring GetEmbeddedWebViewDir() {
+    wchar_t localApp[MAX_PATH] = {};
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) && localApp[0]) {
+        std::wstring base = std::wstring(localApp) + L"\\ViceBoxX";
+        CreateDirectoryW(base.c_str(), nullptr);
+        std::wstring prof = base + L"\\EmbeddedWebView2";
+        CreateDirectoryW(prof.c_str(), nullptr);
+        return prof;
+    }
+    return L"";
+}
+
 inline std::wstring FindChromiumAppBrowser() {
     wchar_t progFiles[MAX_PATH] = {};
     wchar_t progFiles86[MAX_PATH] = {};
@@ -265,7 +282,7 @@ inline std::wstring FindChromiumAppBrowser() {
  */
 inline std::string LaunchGameViewport(const std::string& url, int viewportMode, bool highPerfGpu = false) {
     std::wstring wUrl = Utf8ToWide(url);
-    if (viewportMode != 2) {
+    if (viewportMode != 3) {
         std::wstring browser = FindChromiumAppBrowser();
         if (!browser.empty()) {
             std::wstring profDir = GetViewportProfileDir();
@@ -366,7 +383,7 @@ inline void LoadConfig(EmulatorConfig& cfg) {
             else if (k == "shadowsIndex") cfg.shadowsIndex = std::stoi(v);
             else if (k == "renderDistance") cfg.renderDistance = std::stoi(v);
             else if (k == "gta5Mode") cfg.gta5Mode = std::stoi(v);
-            else if (k == "viewportMode") cfg.viewportMode = std::stoi(v);
+            else if (k == "viewportMode") cfg.viewportMode = std::max(0, std::min(3, std::stoi(v)));
             else if (k == "consoleTarget") cfg.consoleTarget = std::max(0, std::min(2, std::stoi(v)));
             else if (k == "showDebugHud") cfg.showDebugHud = (std::stoi(v) != 0);
             else if (k == "enableCheatMenu") cfg.enableCheatMenu = (std::stoi(v) != 0);
