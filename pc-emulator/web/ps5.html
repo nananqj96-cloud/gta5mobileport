@@ -1550,11 +1550,11 @@
         const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
-          openModal('Grand Theft Auto VI — Launched', `<p>Executed developer target:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Process started directly from PS5 Dashboard.</p>`, [
+          openModal('Grand Theft Auto VI — Launched', `<p>Opened custom file:<br><code style="color:#38bdf8;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Launched directly from PS5 Dashboard.</p>`, [
             { label: 'Continue', primary: true, fn: closeModal }
           ]);
         } else {
-          openModal('GTA VI Developer Target Error', `<p>${d.error || 'No custom .exe path configured in Foxxy Developer Settings.'}</p>`, [
+          openModal('GTA VI Developer Target Error', `<p>${d.error || 'Select any custom file in Foxxy Developer Settings first.'}</p>`, [
             { label: 'OK', primary: true, fn: closeModal }
           ]);
         }

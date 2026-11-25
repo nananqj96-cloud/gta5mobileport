@@ -198,20 +198,36 @@ inline bool FileExistsW(const std::wstring& path) {
     return (attr != INVALID_FILE_ATTRIBUTES) && !(attr & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-inline std::string PickExecutableFileDialog(HWND owner) {
-    wchar_t fileBuf[MAX_PATH * 2] = {};
+inline std::string PickCustomFileDialog(HWND owner) {
+    wchar_t fileBuf[MAX_PATH * 4] = {};
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = owner;
-    ofn.lpstrFilter = L"Windows Executables (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter =
+        L"All Files (*.*)\0*.*\0"
+        L"Executables & Scripts (*.exe;*.bat;*.cmd;*.lnk;*.msi)\0*.exe;*.bat;*.cmd;*.lnk;*.msi\0"
+        L"Media & Archives (*.mp4;*.mkv;*.iso;*.zip;*.html)\0*.mp4;*.mkv;*.iso;*.zip;*.html\0";
+    ofn.nFilterIndex = 1; // Default to All Files (*.*) so ANY file type is shown immediately!
     ofn.lpstrFile = fileBuf;
     ofn.nMaxFile = static_cast<DWORD>(sizeof(fileBuf) / sizeof(wchar_t));
-    ofn.lpstrTitle = L"Select Custom GTA VI Developer Executable (.exe)";
+    ofn.lpstrTitle = L"Select Custom GTA VI Launch Target (Any File Type)";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&ofn)) {
         return WideToUtf8(std::wstring(fileBuf));
     }
     return {};
+}
+
+inline std::wstring GetViewportProfileDir() {
+    wchar_t localApp[MAX_PATH] = {};
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) && localApp[0]) {
+        std::wstring base = std::wstring(localApp) + L"\\ViceBoxX";
+        CreateDirectoryW(base.c_str(), nullptr);
+        std::wstring prof = base + L"\\ViewportProfile";
+        CreateDirectoryW(prof.c_str(), nullptr);
+        return prof;
+    }
+    return L"";
 }
 
 inline std::wstring FindChromiumAppBrowser() {
@@ -239,17 +255,25 @@ inline std::wstring FindChromiumAppBrowser() {
 
 /**
  * Launches the PS5 / Xbox Emulator Dashboard or GTA VI Updates page inside a clean
- * frameless WebGPU game viewport (--app mode) with autoplay audio enabled and high-perf GPU.
+ * dedicated foreground WebGPU game window (--app mode) with zero Startup Boost hijack.
  */
 inline std::string LaunchGameViewport(const std::string& url, int viewportMode, bool highPerfGpu = false) {
     std::wstring wUrl = Utf8ToWide(url);
     if (viewportMode != 2) {
         std::wstring browser = FindChromiumAppBrowser();
         if (!browser.empty()) {
-            std::wstring cmd = L"\"" + browser + L"\" --app=\"" + wUrl + L"\""
-                               L" --autoplay-policy=no-user-gesture-required";
+            std::wstring profDir = GetViewportProfileDir();
+            // Dedicated user-data-dir + --new-window guarantees Edge/Chrome ALWAYS pops up a
+            // fresh foreground frameless console window even if Edge Startup Boost is active!
+            std::wstring cmd = L"\"" + browser + L"\"";
+            if (!profDir.empty()) {
+                cmd += L" --user-data-dir=\"" + profDir + L"\"";
+            }
+            cmd += L" --new-window --no-first-run --no-default-browser-check"
+                   L" --autoplay-policy=no-user-gesture-required"
+                   L" --app=" + wUrl;
             if (highPerfGpu) {
-                cmd += L" --force-high-performance-gpu --enable-unsafe-webgpu";
+                cmd += L" --force-high-performance-gpu";
             }
             if (viewportMode == 1) {
                 cmd += L" --start-fullscreen";
@@ -258,10 +282,12 @@ inline std::string LaunchGameViewport(const std::string& url, int viewportMode, 
             }
             STARTUPINFOW si{};
             si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_SHOWNORMAL;
             PROCESS_INFORMATION pi{};
             std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
             cmdBuf.push_back(L'\0');
-            if (CreateProcessW(browser.c_str(), cmdBuf.data(), nullptr, nullptr, FALSE,
+            if (CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE,
                                CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &si, &pi)) {
                 CloseHandle(pi.hThread);
                 CloseHandle(pi.hProcess);

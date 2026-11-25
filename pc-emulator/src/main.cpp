@@ -214,10 +214,12 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 static bool IsFoxxyUsername(const std::string& name) {
-    if (name.size() != 5) return false;
-    std::string lo = name;
-    for (char& c : lo) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return lo == "foxxy";
+    std::string s = name;
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    if (s.size() != 5) return false;
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s == "foxxy";
 }
 
 // ==================== APPLICATION STATE ====================
@@ -230,6 +232,7 @@ struct AppState {
     // Login state
     char gamertagBuf[64] = "";
     char passkeyBuf[64] = "";
+    char devPathBuf[1024] = "";
     bool showPasskey = false;
     bool authenticating = false;
     float authTimer = 0.0f;
@@ -456,17 +459,18 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                "PS5 & XBOX HYPERVISOR  //  v2.0");
+                "PS5 & XBOX EMULATOR  //  v2.1");
     ImGui::PopFont();
 
-    // Center Navigation Tabs (3 tabs normally, 4th DEVELOPER tab unlocked for Foxxy!)
+    // Center Navigation Tabs (compact widths so DEVELOPER NEVER overlaps on any screen!)
     if (app.screen == AppScreen::Dashboard && app.dashFade > 0.05f) {
         const int numTabs = app.isFoxxyDev ? 4 : 3;
-        const char* tabs[4] = { "EMULATORS", "ENGINE CONFIG", "HYPERVISOR LOG", "DEVELOPER" };
-        const float tabW[4] = { 108.0f, 128.0f, 138.0f, 108.0f };
+        const char* tabs[4] = { "EMULATORS", "CONFIG", "LOG", "DEVELOPER" };
+        const float tabW[4] = { 102.0f, 82.0f, 64.0f, 112.0f };
         float totalW = 0.0f;
-        for (int i = 0; i < numTabs; ++i) totalW += tabW[i] + (i > 0 ? 8.0f : 0.0f);
-        const float startX = (winW - totalW) * 0.5f;
+        for (int i = 0; i < numTabs; ++i) totalW += tabW[i] + (i > 0 ? 6.0f : 0.0f);
+        float startX = (winW - totalW) * 0.5f;
+        if (startX < 268.0f) startX = 268.0f;
         g_NavLeftX = startX - 8.0f;
         g_NavRightX = startX + totalW + 8.0f;
 
@@ -480,7 +484,7 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         float targetW = tabW[0];
         for (int i = 0; i < numTabs; ++i) {
             if (i == app.activeTab) { targetX = curX; targetW = tabW[i]; }
-            curX += tabW[i] + 8.0f;
+            curX += tabW[i] + 6.0f;
         }
         if (app.tabPillX < 1.0f) { app.tabPillX = targetX; app.tabPillW = targetW; }
         app.tabPillX = ExpLerp(app.tabPillX, targetX, 15.0f, dt);
@@ -516,11 +520,11 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
             ImVec2 ts = ImGui::CalcTextSize(tabs[i]);
             ImVec4 tcol = (app.activeTab == i)
                               ? (i == 3 ? kDevGold : Palette::TextHi)
-                              : (i == 3 ? ImVec4(0.98f, 0.82f, 0.36f, hov ? 1.0f : 0.78f)
+                              : (i == 3 ? ImVec4(0.98f, 0.82f, 0.36f, hov ? 1.0f : 0.86f)
                                         : (hov ? ImVec4(0.84f, 0.90f, 0.96f, 1.0f) : Palette::TextMid));
             dl->AddText(ImVec2(curX + (tabW[i] - ts.x) * 0.5f, 12.0f + (30.0f - ts.y) * 0.5f),
                         ColAlpha(tcol, app.dashFade), tabs[i]);
-            curX += tabW[i] + 8.0f;
+            curX += tabW[i] + 6.0f;
         }
         ImGui::PopFont();
     } else {
@@ -657,7 +661,7 @@ static void RenderLoginScreen(AppState& app, const FontSet& fonts, SoundEngine& 
     ImGui::PopFont();
 
     ImGui::PushFont(fonts.mono);
-    const char* sub = "PS5 & XBOX SERIES X EMULATOR  //  CYBERLEEKS v2.0";
+    const char* sub = "PS5 & XBOX SERIES X EMULATOR  //  CYBERLEEKS v2.1";
     ImVec2 ss = ImGui::CalcTextSize(sub);
     dl->AddText(ImVec2(cMin.x + (cardW - ss.x) * 0.5f, cMin.y + 124.0f), ColAlpha(Palette::Cyan, 0.85f * alpha), sub);
     ImGui::PopFont();
@@ -774,14 +778,16 @@ static void RenderLoginScreen(AppState& app, const FontSet& fonts, SoundEngine& 
         while (!gt.empty() && (gt.front() == ' ' || gt.front() == '\t')) gt.erase(gt.begin());
         while (!gt.empty() && (gt.back() == ' ' || gt.back() == '\t')) gt.pop_back();
 
-        if (gt.empty() || pk.empty()) {
+        bool isDevLogin = IsFoxxyUsername(gt);
+        if (gt.empty() || (!isDevLogin && pk.empty())) {
             app.authError = "Enter your Gamertag and Passkey to continue.";
             app.loginShakeT = 1.0f;
             sfx.Play(SfxId::Locked, 0.85f);
         } else {
             app.authError.clear();
             app.signedInUser = gt;
-            app.isFoxxyDev = IsFoxxyUsername(gt);
+            app.isFoxxyDev = isDevLogin;
+            std::snprintf(app.devPathBuf, sizeof(app.devPathBuf), "%s", app.config.devGta6ExePath.c_str());
             app.config.savedGamertag = app.config.rememberSession ? gt : "";
             SaveConfig(app.config);
             app.authenticating = true;
@@ -1093,9 +1099,11 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
             dl->AddRect(boxMin, boxMax, ColAlpha(ImVec4(c6Accent.x, c6Accent.y, c6Accent.z, 0.28f), alpha), 9.0f);
             std::string boxTxt;
             if (devGta6Ready) {
-                std::string fn = app.config.devGta6ExePath.empty() ? "(No .exe picked — configure in DEVELOPER tab)" : app.config.devGta6ExePath;
+                std::string fn = app.config.devGta6ExePath.empty() ? "(No file picked — configure in DEVELOPER tab)" : app.config.devGta6ExePath;
                 if (fn.size() > 54) fn = "..." + fn.substr(fn.size() - 51);
-                boxTxt = "Dev Target: " + fn + "\nBoots console UI with GTA VI mounted; .exe runs ONLY when played inside PS5/Xbox UI.";
+                boxTxt = "Dev Target: " + fn + "\nBoots console UI with GTA VI mounted; your custom file launches ONLY when played inside PS5/Xbox UI.";
+            } else if (app.isFoxxyDev) {
+                boxTxt = "Foxxy Dev Mode Unlocked! Open the DEVELOPER tab (top header) to enable GTA VI Emulation and bind ANY file type.";
             } else {
                 boxTxt = "Live GTA VI Dev Build: runs at 5 FPS per 20 seconds (game fully works, semi-playable — only FPS optimization needed).\nClick below for full Cyberleeks GTA 6 Updates!";
             }
@@ -1109,22 +1117,27 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         ImGui::PushFont(fonts.bold);
         const char* cta6 = devGta6Ready
             ? (isPs5 ? "BOOT PS5 UI  (GTA VI DEV MOUNTED)" : "BOOT XBOX UI  (GTA VI DEV MOUNTED)")
-            : "VIEW GTA 6 UPDATES  ·  CYBERLEEKS";
+            : (app.isFoxxyDev ? "OPEN FOXXY DEVELOPER SETTINGS" : "VIEW GTA 6 UPDATES  ·  CYBERLEEKS");
         bool click6 = !app.launching && DrawNeonButton(
             "##btn_gta6", cta6, ImVec2(cardW - 44.0f, 46.0f),
-            devGta6Ready ? kDevGoldDk : ImVec4(0.56f, 0.09f, 0.34f, 1.0f),
-            c6Accent, app.btnGta6Hover, dt, sfx, false, alpha, &btnC6);
+            (devGta6Ready || app.isFoxxyDev) ? kDevGoldDk : ImVec4(0.56f, 0.09f, 0.34f, 1.0f),
+            (devGta6Ready || app.isFoxxyDev) ? kDevGold : c6Accent, app.btnGta6Hover, dt, sfx, false, alpha, &btnC6);
         ImGui::PopFont();
 
         if (click6) {
             if (devGta6Ready) {
                 if (app.config.devGta6ExePath.empty()) {
-                    app.gta6ShakeT = 1.0f;
-                    app.ShowToast("Pick a custom .exe file inside the DEVELOPER tab first!", kDevGold);
-                    sfx.Play(SfxId::Locked, 0.85f);
+                    app.activeTab = 3;
+                    app.tabSlideAlpha = 0.0f;
+                    app.ShowToast("Pick ANY file inside DEVELOPER settings first!", kDevGold);
+                    sfx.Play(SfxId::TabSwitch, 0.85f);
                 } else {
                     TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta6", false);
                 }
+            } else if (app.isFoxxyDev) {
+                app.activeTab = 3;
+                app.tabSlideAlpha = 0.0f;
+                sfx.Play(SfxId::TabSwitch, 0.85f);
             } else {
                 // Opens the dedicated Cyberleeks GTA VI Development Updates Page!
                 TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta5", true);
@@ -1150,9 +1163,9 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         ImGui::PushFont(fonts.mono);
         char hwLine[320];
         std::string gpuShort = app.liveHw.gpuName.empty() ? app.hw.gpuName : app.liveHw.gpuName;
-        if (gpuShort.size() > 28) gpuShort = gpuShort.substr(0, 26) + "..";
+        if (gpuShort.size() > 24) gpuShort = gpuShort.substr(0, 22) + "..";
         std::snprintf(hwLine, sizeof(hwLine),
-                      "GPU: %s (%.0f%%)  |  VRAM: %.0f MB  |  CPU: %.1f%%  |  RAM: %.1f/%.1f GB  |  HTTP: :%u",
+                      "GPU: %s (%.0f%%) | VRAM: %.0fMB | CPU: %.1f%% | RAM: %.1f/%.1fGB | :%u",
                       gpuShort.c_str(), app.liveHw.gpuPct, app.liveHw.vramUsedMb,
                       app.liveHw.cpuPct, app.liveHw.ramUsedGb,
                       app.liveHw.ramTotalGb > 0.1 ? app.liveHw.ramTotalGb : app.hw.totalRamGb,
@@ -1161,20 +1174,21 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
                     ColAlpha(Palette::TextMid, alpha), hwLine);
         ImGui::PopFont();
 
-        float waveW = 80.0f;
-        float waveX0 = bMax.x - waveW - 18.0f;
-        float waveMidY = bMin.y + statusBarH * 0.5f;
-        ImVec2 prevPt{};
-        for (int i = 0; i <= 24; ++i) {
-            float u = static_cast<float>(i) / 24.0f;
-            float env = std::sin(u * 3.14159f);
-            float yOff = (std::sin(u * 14.0f - time * 5.2f) * 0.65f + std::sin(u * 27.0f + time * 3.1f) * 0.35f) * 9.0f * env;
-            ImVec2 pt(waveX0 + u * waveW, waveMidY + yOff);
-            if (i > 0) {
-                dl->AddLine(prevPt, pt, ColAlpha(LerpColor(isPs5 ? kPs5Blue : Palette::Emerald, Palette::Cyan, u), 0.80f * alpha), 1.6f);
-            }
-            prevPt = pt;
+        // Direct fallback button: opens active PS5/Xbox console menu straight in System Browser
+        const float fbW = 152.0f;
+        const float fbH = 30.0f;
+        ImVec2 fbPos(bMax.x - fbW - 14.0f, bMin.y + (statusBarH - fbH) * 0.5f);
+        ImGui::SetCursorPos(fbPos);
+        ImGui::PushFont(fonts.mono);
+        if (ImGui::Button(isPs5 ? "OPEN PS5 IN BROWSER" : "OPEN XBOX IN BROWSER", ImVec2(fbW, fbH))) {
+            app.SyncToShared(shared, sharedMu, "gta5");
+            std::string directUrl = server.BaseUrl() + (isPs5 ? "/ps5/" : "/xbox/");
+            LaunchGameViewport(directUrl, 2, false);
+            sfx.Play(SfxId::Launch, 0.85f);
+            app.PushLog("[BROWSER] Opened direct console UI: " + directUrl);
+            app.ShowToast("Opened " + directUrl + " in default browser!", isPs5 ? kPs5Blue : Palette::Emerald);
         }
+        ImGui::PopFont();
     }
 }
 
@@ -1485,49 +1499,46 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     }
     y += 42.0f;
 
-    // 2. Custom .exe File Picker
+    // 2. Custom File Picker (ANY FILE TYPE!) + Editable Path / URL Box
     ImGui::PushFont(fonts.mono);
-    dl->AddText(ImVec2(x, y), ColAlpha(Palette::TextMid, alpha), "CUSTOM EXECUTABLE TARGET (.EXE) FOR GTA VI");
+    dl->AddText(ImVec2(x, y), ColAlpha(Palette::TextMid, alpha), "CUSTOM GTA VI LAUNCH TARGET (ANY FILE TYPE OR URL)");
     ImGui::PopFont();
     y += 22.0f;
 
-    // Path display box
-    float pathBoxW = w - 260.0f;
-    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + pathBoxW, y + 44.0f),
-                      ColAlpha(ImVec4(0.03f, 0.04f, 0.08f, 0.92f), alpha), 9.0f);
-    dl->AddRect(ImVec2(x, y), ImVec2(x + pathBoxW, y + 44.0f),
-                ColAlpha(app.config.devGta6ExePath.empty() ? ImVec4(1, 1, 1, 0.14f) : kDevGold, 0.55f * alpha), 9.0f);
-
-    std::string dispPath = app.config.devGta6ExePath.empty()
-        ? "[No .exe selected — click Browse to pick any executable on your PC]"
-        : app.config.devGta6ExePath;
-    if (dispPath.size() > 78) dispPath = "..." + dispPath.substr(dispPath.size() - 75);
-    ImGui::PushFont(fonts.mono);
-    dl->AddText(ImVec2(x + 14.0f, y + 14.0f),
-                ColAlpha(app.config.devGta6ExePath.empty() ? Palette::TextDim : Palette::TextHi, alpha),
-                dispPath.c_str());
-    ImGui::PopFont();
+    float pathBoxW = w - 274.0f;
+    ImGui::SetCursorPos(ImVec2(x, y + 3.0f));
+    ImGui::SetNextItemWidth(pathBoxW);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    if (ImGui::InputTextWithHint("##dev_path_inp", "Browse ANY file (.exe, .bat, .mp4, .iso, .zip, .html, .png, etc.) or paste path/URL",
+                                 app.devPathBuf, sizeof(app.devPathBuf))) {
+        app.config.devGta6ExePath = app.devPathBuf;
+        SaveConfig(app.config);
+        app.SyncToShared(shared, sharedMu);
+    }
+    ImGui::PopStyleVar();
 
     ImGui::SetCursorPos(ImVec2(x + pathBoxW + 12.0f, y));
     ImGui::PushFont(fonts.bold);
-    bool browseClick = DrawNeonButton("##dev_browse", "BROWSE .EXE...", ImVec2(158.0f, 44.0f),
+    bool browseClick = DrawNeonButton("##dev_browse", "BROWSE FILE...", ImVec2(172.0f, 44.0f),
                                       kDevGoldDk, kDevGold, app.btnDevBrowseHover, dt, sfx, false, alpha);
     ImGui::PopFont();
     if (browseClick) {
-        std::string picked = PickExecutableFileDialog(g_hWnd);
+        std::string picked = PickCustomFileDialog(g_hWnd);
         if (!picked.empty()) {
             app.config.devGta6ExePath = picked;
+            std::snprintf(app.devPathBuf, sizeof(app.devPathBuf), "%s", picked.c_str());
             app.config.devGta6Enabled = true;
             SaveConfig(app.config);
             app.SyncToShared(shared, sharedMu);
-            app.PushLog("[DEV] Bound GTA VI custom executable: " + picked);
-            app.ShowToast("Selected GTA VI .exe! Launch it from inside the PS5 or Xbox Emulator UI.", kDevGold);
+            app.PushLog("[DEV] Bound GTA VI custom target file: " + picked);
+            app.ShowToast("Selected GTA VI target file! Launch it from inside the PS5 or Xbox Emulator UI.", kDevGold);
         }
     }
 
-    ImGui::SetCursorPos(ImVec2(x + pathBoxW + 178.0f, y));
+    ImGui::SetCursorPos(ImVec2(x + pathBoxW + 192.0f, y));
     if (ImGui::Button("CLEAR", ImVec2(82.0f, 44.0f))) {
         app.config.devGta6ExePath.clear();
+        app.devPathBuf[0] = '\0';
         SaveConfig(app.config);
         app.SyncToShared(shared, sharedMu);
         sfx.Play(SfxId::Click, 0.60f);
@@ -1539,11 +1550,11 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
                       ColAlpha(ImVec4(0.14f, 0.10f, 0.03f, 0.55f), alpha), 10.0f);
     dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 88.0f), ColAlpha(kDevGold, 0.42f * alpha), 10.0f);
     ImGui::PushFont(fonts.bold);
-    dl->AddText(ImVec2(x + 16.0f, y + 12.0f), ColAlpha(kDevGold, alpha), "STRICT CONSOLE-UI EXECUTION RULE");
+    dl->AddText(ImVec2(x + 16.0f, y + 12.0f), ColAlpha(kDevGold, alpha), "STRICT CONSOLE-UI LAUNCH RULE (ALL FILE TYPES SUPPORTED)");
     ImGui::PopFont();
     dl->AddText(nullptr, 15.0f, ImVec2(x + 16.0f, y + 36.0f), ColAlpha(Palette::TextHi, 0.92f * alpha),
-                "Your selected .exe will NOT run from this launcher settings tab.\n"
-                "It executes ONLY when you boot the PS5 or Xbox Emulator UI with GTA VI mounted and press Play on Grand Theft Auto VI.",
+                "Your selected file (any type: .exe, .bat, .lnk, .mp4, .html, .iso, .zip, etc.) will NOT launch from this tab.\n"
+                "It launches ONLY when you boot the PS5 or Xbox Emulator UI with GTA VI mounted and press Play on Grand Theft Auto VI.",
                 nullptr, w - 32.0f);
     y += 110.0f;
 
@@ -1560,7 +1571,7 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
 
     if (bootDevConsole) {
         if (!app.config.devGta6Enabled || app.config.devGta6ExePath.empty()) {
-            app.ShowToast("Enable GTA VI Emulation and pick a .exe file first.", kDevGold);
+            app.ShowToast("Enable GTA VI Emulation and pick any file first.", kDevGold);
         } else {
             TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bCenter, "gta6", false);
         }
@@ -1697,6 +1708,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     LoadConfig(app.config);
     if (!app.config.savedGamertag.empty()) {
         std::snprintf(app.gamertagBuf, sizeof(app.gamertagBuf), "%s", app.config.savedGamertag.c_str());
+    }
+    if (!app.config.devGta6ExePath.empty()) {
+        std::snprintf(app.devPathBuf, sizeof(app.devPathBuf), "%s", app.config.devGta6ExePath.c_str());
     }
 
     if (!CreateDeviceD3D(g_hWnd, app.hw.gpuName)) {

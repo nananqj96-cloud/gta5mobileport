@@ -651,9 +651,9 @@
         const res = await fetch('/vbx/api/launch-custom-exe', { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
-          openModal('GTA VI Developer Build Launched', `<p>Executed custom target:<br><code style="color:#4ade80;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Started directly from Xbox DashX360 UI.</p>`);
+          openModal('GTA VI Developer Target Launched', `<p>Launched custom file:<br><code style="color:#4ade80;word-break:break-all;">${d.exePath}</code></p><p style="font-size:13px;color:#94a3b8;">Started directly from Xbox DashX360 UI.</p>`);
         } else {
-          openModal('GTA VI Launch Error', `<p>${d.error || 'Set a custom .exe in Foxxy Developer Settings first.'}</p>`);
+          openModal('GTA VI Launch Error', `<p>${d.error || 'Select any custom file inside Foxxy Developer Settings first.'}</p>`);
         }
       } catch (e) {
         openModal('Bridge Error', '<p>Unable to reach local ViceBox X server.</p>');

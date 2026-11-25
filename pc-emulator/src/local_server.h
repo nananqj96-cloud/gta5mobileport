@@ -92,9 +92,12 @@ public:
         listenSock_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (listenSock_ == INVALID_SOCKET) return false;
 
-        int yes = 1;
-        setsockopt(listenSock_, SOL_SOCKET, SO_REUSEADDR,
-                   reinterpret_cast<const char*>(&yes), sizeof(yes));
+        // Exclusive bind on Windows prevents two instances from silently hijacking port 17585
+#ifdef SO_EXCLUSIVEADDRUSE
+        int excl = 1;
+        setsockopt(listenSock_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&excl), sizeof(excl));
+#endif
 
         // Prefer stable localhost port 17585 so browser localStorage (PFPs, Jailbreak edits) persists!
         sockaddr_in addr{};
@@ -297,6 +300,12 @@ private:
                        reinterpret_cast<const char*>(&rcvTimeout), sizeof(rcvTimeout));
             std::thread([this, client]() {
                 HandleClient(client);
+                shutdown(client, SD_SEND);
+                char drain[256];
+                DWORD shortTo = 80;
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+                           reinterpret_cast<const char*>(&shortTo), sizeof(shortTo));
+                recv(client, drain, sizeof(drain), 0);
                 closesocket(client);
             }).detach();
         }
@@ -547,39 +556,52 @@ private:
 
     void HandleLaunchCustomExe(SOCKET client) {
         bool allowed = false;
-        std::string exePath;
+        std::string targetPath;
         {
             std::lock_guard<std::mutex> lk(*stateMu_);
             allowed = shared_->isFoxxyDev && shared_->devGta6Enabled &&
                       shared_->emulatedGame == "gta6" && !shared_->devGta6ExePath.empty();
-            exePath = shared_->devGta6ExePath;
+            targetPath = shared_->devGta6ExePath;
         }
 
         if (!allowed) {
-            SendJson(client, "{\"ok\":false,\"error\":\"Developer Mode (Foxxy) + Custom GTA VI .exe not enabled.\"}");
+            SendJson(client, "{\"ok\":false,\"error\":\"Developer Mode (Foxxy) + Custom GTA VI file not enabled.\"}");
             return;
         }
 
-        std::wstring wExe = Utf8ToWide(exePath);
-        DWORD attrs = GetFileAttributesW(wExe.c_str());
-        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-            SendJson(client, "{\"ok\":false,\"error\":\"Selected .exe file no longer exists on disk.\"}");
-            return;
-        }
+        std::wstring wTarget = Utf8ToWide(targetPath);
+        bool isUrl = (targetPath.rfind("http://", 0) == 0 || targetPath.rfind("https://", 0) == 0);
 
         std::wstring wDir;
-        size_t slash = wExe.find_last_of(L"\\/");
-        if (slash != std::wstring::npos) wDir = wExe.substr(0, slash);
+        if (!isUrl) {
+            DWORD attrs = GetFileAttributesW(wTarget.c_str());
+            if (attrs == INVALID_FILE_ATTRIBUTES) {
+                SendJson(client, "{\"ok\":false,\"error\":\"Selected file no longer exists on disk.\"}");
+                return;
+            }
+            size_t slash = wTarget.find_last_of(L"\\/");
+            if (slash != std::wstring::npos) wDir = wTarget.substr(0, slash);
+        }
 
         HINSTANCE res = ShellExecuteW(
-            nullptr, L"open", wExe.c_str(), nullptr,
+            nullptr, L"open", wTarget.c_str(), nullptr,
             wDir.empty() ? nullptr : wDir.c_str(), SW_SHOWNORMAL);
-        if (reinterpret_cast<intptr_t>(res) <= 32) {
-            SendJson(client, "{\"ok\":false,\"error\":\"Windows failed to start the selected executable.\"}");
+        intptr_t code = reinterpret_cast<intptr_t>(res);
+
+        // If the file extension has no default Windows app, open Windows "Open With..." dialog
+        if (code == SE_ERR_NOASSOC || code == SE_ERR_ASSOCINCOMPLETE) {
+            std::wstring openAsArgs = L"shell32.dll,OpenAs_RunDLL " + wTarget;
+            res = ShellExecuteW(nullptr, L"open", L"rundll32.exe", openAsArgs.c_str(),
+                                wDir.empty() ? nullptr : wDir.c_str(), SW_SHOWNORMAL);
+            code = reinterpret_cast<intptr_t>(res);
+        }
+
+        if (code <= 32) {
+            SendJson(client, "{\"ok\":false,\"error\":\"Windows failed to launch the selected file.\"}");
             return;
         }
 
-        std::string json = "{\"ok\":true,\"exePath\":\"" + EscapeJson(exePath) + "\"}";
+        std::string json = "{\"ok\":true,\"exePath\":\"" + EscapeJson(targetPath) + "\"}";
         SendJson(client, json);
     }
 
