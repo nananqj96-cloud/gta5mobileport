@@ -448,7 +448,7 @@ public final class DeveloperTrainerOverlay extends FrameLayout {
         ultraRow.addView(new View(ctx), new LinearLayout.LayoutParams(dp(5), 1));
         ultraRow.addView(makeFullBtn(ctx, "⚡ FLUSH RAM", 0xFF0F766E, () -> {
             if (callback != null) callback.onTriggerMemoryTrim();
-            showToast("⚡ Flushed GPU BindGroups & IO RAM Cache!");
+            showStatus("⚡ Flushed GPU BindGroups & IO RAM Cache!");
         }), new LinearLayout.LayoutParams(0, dp(36), 1f));
         tabContent.addView(ultraRow, ulp);
 
