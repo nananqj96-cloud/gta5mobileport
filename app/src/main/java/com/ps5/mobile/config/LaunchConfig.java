@@ -255,6 +255,7 @@ public final class LaunchConfig {
         b.appendQueryParameter("scale", String.format(Locale.US, "%.2f", resScalePct / 100.0));
         b.appendQueryParameter("shadows", shadowsLevel >= 0 ? "1" : "0");
         b.appendQueryParameter("fixed", "1");
+        b.appendQueryParameter("mem32", "1");
         if (engineLowProfile) {
             b.appendQueryParameter("cores", String.valueOf(engineCores));
             b.appendQueryParameter("slots", String.valueOf(gpuSlots));
@@ -370,7 +371,7 @@ public final class LaunchConfig {
     public String getPs5HomeSubtitle() {
         String rd = renderDistance < 0 ? "Default" : (renderDistance + "/100");
         String sh = shadowsLevel < 0 ? "Shadows OFF" : ("Shadows " + shadowsLevel);
-        return String.format(Locale.US, "Chrome 64-bit COOP/COEP · %s (%s · %dp) · RD %s",
+        return String.format(Locale.US, "In-App Landscape WebGPU · %s (%s · %dp) · RD %s",
                 PRESET_SHORT[graphicsPreset], sh, renderHeight, rd);
     }
 

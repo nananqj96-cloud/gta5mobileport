@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ps5.mobile"
-    android:versionCode="3"
-    android:versionName="2.1.0">
+    android:versionCode="4"
+    android:versionName="2.2.0">
 
     <uses-sdk
         android:minSdkVersion="26"
@@ -13,28 +13,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen.multitouch" android:required="false" />
-
-    <queries>
-        <package android:name="com.android.chrome" />
-        <package android:name="com.chrome.beta" />
-        <package android:name="com.chrome.dev" />
-        <package android:name="com.chrome.canary" />
-        <package android:name="com.brave.browser" />
-        <package android:name="com.microsoft.emmx" />
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="http" />
-        </intent>
-        <intent>
-            <action android:name="android.support.customtabs.action.CustomTabsService" />
-        </intent>
-    </queries>
 
     <application
         android:allowBackup="true"
@@ -43,7 +24,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:largeHeap="true"
-        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ps5Mobile">
 
@@ -67,14 +47,5 @@
             android:launchMode="singleTop"
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.Ps5Mobile.Game" />
-
-        <service
-            android:name=".proxy.RuntimeProxyService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Local COOP/COEP localhost reverse proxy and live hardware telemetry server for Chrome WebGPU gameplay" />
-        </service>
     </application>
 </manifest>

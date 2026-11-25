@@ -26,6 +26,7 @@ public final class MobileControlsOverlay extends FrameLayout {
         void onOpenSettings();
         void onReturnToPs5Home();
         void onReloadGame(boolean forcePotatoLowEnd);
+        void onUpdateWebView();
     }
 
     private static final int COBALT = 0xFF0070D1;
@@ -51,6 +52,7 @@ public final class MobileControlsOverlay extends FrameLayout {
     private final LinearLayout titleDock;
     private final LinearLayout errorBanner;
     private final TextView tvErrorMsg;
+    private final TextView btnUpdateWebView;
 
     private final TextView btnMode;
     private final TextView btnSens;
@@ -188,7 +190,11 @@ public final class MobileControlsOverlay extends FrameLayout {
         errActions.setOrientation(LinearLayout.HORIZONTAL);
         errActions.setGravity(Gravity.CENTER);
         errActions.setPadding(0, dp(12), 0, 0);
-        addTitleChip(context, errActions, "RETRY POTATO LOW-END", EMERALD, () -> {
+        btnUpdateWebView = addTitleChipView(context, errActions, "UPDATE WEBVIEW", COBALT, () -> {
+            if (hostCallback != null) hostCallback.onUpdateWebView();
+        });
+        btnUpdateWebView.setVisibility(View.GONE);
+        addTitleChip(context, errActions, "POTATO MODE", EMERALD, () -> {
             hideError();
             if (hostCallback != null) hostCallback.onReloadGame(true);
         });
@@ -201,7 +207,7 @@ public final class MobileControlsOverlay extends FrameLayout {
         });
         errorBanner.addView(errActions);
 
-        LayoutParams errLp = new LayoutParams(dp(420), LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        LayoutParams errLp = new LayoutParams(dp(480), LayoutParams.WRAP_CONTENT, Gravity.CENTER);
         addView(errorBanner, errLp);
 
         applyControlMode(ControlMode.FOOT);
@@ -418,7 +424,14 @@ public final class MobileControlsOverlay extends FrameLayout {
     }
 
     public void showError(String message) {
+        showError(message, false);
+    }
+
+    public void showError(String message, boolean showWebViewUpdate) {
         tvErrorMsg.setText(message);
+        if (btnUpdateWebView != null) {
+            btnUpdateWebView.setVisibility(showWebViewUpdate ? View.VISIBLE : View.GONE);
+        }
         errorBanner.setVisibility(View.VISIBLE);
     }
 
@@ -515,6 +528,10 @@ public final class MobileControlsOverlay extends FrameLayout {
     }
 
     private void addTitleChip(Context ctx, LinearLayout parent, String text, int accent, Runnable action) {
+        addTitleChipView(ctx, parent, text, accent, action);
+    }
+
+    private TextView addTitleChipView(Context ctx, LinearLayout parent, String text, int accent, Runnable action) {
         TextView tv = new TextView(ctx);
         tv.setText(text);
         tv.setTextColor(Color.WHITE);
@@ -537,6 +554,7 @@ public final class MobileControlsOverlay extends FrameLayout {
             action.run();
         });
         parent.addView(tv);
+        return tv;
     }
 
     private void styleChip(TextView tv, int accent) {

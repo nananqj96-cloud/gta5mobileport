@@ -269,11 +269,11 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("System Information")
                 .setMessage(
-                        "PS5 Mobile Shell v2.1\n\n"
-                                + "Under the hood, this app is NOT a native PS5 hypervisor — it wraps a PlayStation 5 Home UI shell around the live playgta5.com Grand Theft Auto V WebGPU + 64-bit WebAssembly runtime.\n\n"
-                                + "• Chrome 64-bit COOP/COEP Bridge: Android System WebView blocks crossOriginIsolated and lacks 3 GB WASM heap, so Play Game starts an embedded localhost COOP/COEP proxy and launches GTA V in Chrome Custom Tab with full WebGPU, SharedArrayBuffer & injected PS5 controls.\n"
+                        "PS5 Mobile Shell v2.2\n\n"
+                                + "Under the hood, this app is NOT a native PS5 hypervisor — it wraps a PlayStation 5 Home UI shell around the live playgta5.com Grand Theft Auto V WebGPU + WebAssembly runtime.\n\n"
+                                + "• 100% In-App Landscape Engine: Runs natively inside our fullscreen horizontal WebView using Chromium WebView's Cross-Origin Isolated Allowlist + Document-Isolation-Policy injection + dedicated high-priority renderer.\n"
                                 + "• PS5 Home UI: Controller-only navigation (use the on-screen DualSense D-Pad & ✕ / ○ buttons; direct screen tapping is disabled on PS5 Home).\n"
-                                + "• Lower Graphics Fix: Passes real RAGE engine flags (-shadowQuality=-1, -textureQuality=0, -lodScale, ?scale) below GTA V's pause-menu floor.\n"
+                                + "• Lower Graphics Fix: Passes real RAGE engine flags (-shadowQuality=-1, -textureQuality=0, -lodScale, ?scale, ?mem32=1) below GTA V's pause-menu floor.\n"
                                 + "• Render Distance: Scales -lodScale, -pedLodBias, -vehicleLodBias, and -cityDensity.\n"
                                 + "• Hardware Stats: Live FPS, CPU/GPU usage & RAM — togglable from PS5 Settings.\n"
                                 + "• Floating [D] Button: Opens the GTA V Developer Trainer (vehicles, guns, fly, cheats & graphics)."

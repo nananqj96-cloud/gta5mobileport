@@ -13,7 +13,7 @@ import java.util.Locale;
  */
 public final class GameInputBridge {
 
-    private final WebView webView;
+    private volatile WebView webView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private boolean lastW, lastS, lastA, lastD, lastSprint;
@@ -23,11 +23,20 @@ public final class GameInputBridge {
         this.webView = webView;
     }
 
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+
     private void eval(final String js) {
+        final WebView target = this.webView;
+        if (target == null) return;
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            webView.evaluateJavascript(js, null);
+            target.evaluateJavascript(js, null);
         } else {
-            mainHandler.post(() -> webView.evaluateJavascript(js, null));
+            mainHandler.post(() -> {
+                WebView cur = this.webView;
+                if (cur != null) cur.evaluateJavascript(js, null);
+            });
         }
     }
 

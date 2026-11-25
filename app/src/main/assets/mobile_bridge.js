@@ -6,18 +6,45 @@
     const params = new URLSearchParams(window.location.search);
     const isLowEnd = params.get('low') === '1';
 
-    // 1. Prevent browser pinch-zoom, text selection, context menus, and rubber-band scrolling
+    // 0. Non-breaking SharedArrayBuffer probe (runs at DOCUMENT_START before page JS checks crossOriginIsolated)
+    // Only exposes SharedArrayBuffer if WebView truly allows transferring shared Wasm memory to Workers.
     try {
-        const style = document.createElement('style');
-        style.id = 'gta-mobile-style';
-        style.textContent = [
-            'html, body, #canvas { touch-action: none !important; user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; overscroll-behavior: none !important; }',
-            '#fps { display: none !important; }',
-            '#hud { top: 44px !important; font-size: 11px !important; opacity: 0.85 !important; }',
-            isLowEnd ? '#ls-log { display: none !important; }' : ''
-        ].join('\n');
-        (document.head || document.documentElement).appendChild(style);
+        if (typeof window.SharedArrayBuffer !== 'function' && typeof WebAssembly === 'object' && typeof WebAssembly.Memory === 'function') {
+            const probeMem = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true });
+            const sabCtor = probeMem && probeMem.buffer && probeMem.buffer.constructor;
+            if (sabCtor && typeof structuredClone === 'function') {
+                structuredClone(probeMem.buffer);
+                Object.defineProperty(window, 'SharedArrayBuffer', {
+                    value: sabCtor, writable: true, configurable: true, enumerable: false
+                });
+                Object.defineProperty(window, 'crossOriginIsolated', {
+                    configurable: true, get: function () { return true; }
+                });
+            }
+        }
     } catch (e) {}
+
+    // 1. Prevent browser pinch-zoom, text selection, context menus, and rubber-band scrolling
+    function injectMobileCss() {
+        try {
+            if (document.getElementById('gta-mobile-style')) return;
+            const host = document.head || document.documentElement;
+            if (!host) return;
+            const style = document.createElement('style');
+            style.id = 'gta-mobile-style';
+            style.textContent = [
+                'html, body, #canvas { touch-action: none !important; user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; overscroll-behavior: none !important; }',
+                '#fps { display: none !important; }',
+                '#hud { top: 44px !important; font-size: 11px !important; opacity: 0.85 !important; }',
+                isLowEnd ? '#ls-log { display: none !important; }' : ''
+            ].join('\n');
+            host.appendChild(style);
+        } catch (e) {}
+    }
+    injectMobileCss();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', injectMobileCss, { once: true });
+    }
 
     // 2. Virtual Pointer Lock Shim for Android WebView (enables smooth 360° camera look)
     let virtualLocked = false;
@@ -459,15 +486,20 @@
     } catch (e) {}
 
     // 8. Poll loading state & visible title screen buttons
+    let sawLoading = false;
     setInterval(function () {
+        if (document.readyState === 'loading') return;
         const loading = document.getElementById('loading');
-        if (!loading || getComputedStyle(loading).opacity === '0') {
+        if (loading) sawLoading = true;
+        const isGone = !loading || getComputedStyle(loading).opacity === '0' || getComputedStyle(loading).display === 'none';
+        if (sawLoading && isGone) {
             if (!state.worldReady) {
                 state.worldReady = true;
                 notifyAndroid('onWorldReady');
             }
             return;
         }
+        if (!loading) return;
         const pctEl = document.getElementById('pct');
         const labelEl = document.getElementById('label');
         const pct = pctEl ? parseInt(pctEl.textContent, 10) || 0 : 0;
@@ -476,6 +508,13 @@
             state.lastPct = pct;
             state.lastLabel = label;
             notifyAndroid('onProgress', pct, label);
+            const lowLbl = label.toLowerCase();
+            if (lowLbl.indexOf('not cross-origin isolated') >= 0
+                    || lowLbl.indexOf('no memory') >= 0
+                    || lowLbl.indexOf('out of memory') >= 0
+                    || lowLbl.indexOf('cannot run the game') >= 0) {
+                notifyAndroid('onEngineError', label);
+            }
         }
 
         const modes = document.getElementById('modes');
@@ -491,11 +530,18 @@
         }
     }, 350);
 
-    // 9. Report browser WebGPU + SharedArrayBuffer capabilities to Android
-    notifyAndroid(
-        'onCapabilities',
-        !!navigator.gpu,
-        !!window.crossOriginIsolated,
-        typeof WebAssembly === 'object'
-    );
+    // 9. Report browser WebGPU + SharedArrayBuffer capabilities to Android once DOM is ready
+    function reportCaps() {
+        notifyAndroid(
+            'onCapabilities',
+            !!navigator.gpu,
+            !!window.crossOriginIsolated,
+            typeof WebAssembly === 'object'
+        );
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', reportCaps, { once: true });
+    } else {
+        reportCaps();
+    }
 })();
