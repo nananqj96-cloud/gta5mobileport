@@ -17,7 +17,8 @@
   self.__vbxGta6WgpuInstalled = true;
 
   const fxState = {
-    enabled: 0,           // Activated explicitly by gta6_experimental.js when vbx_gta6=1
+    enabled: 0,           // Activated explicitly by gta6_experimental.js ONLY once the real 3D world is live
+    worldReady: 0,        // Must be 1 (after PlayGTA5 posts { world: true }) before post-FX ever touches frames
     perfAuto: 1,
     lighting: 1,
     motionBlur: 1,
@@ -48,6 +49,7 @@
       const m = ev.data;
       if (!m || typeof m !== 'object') return;
       if (m.enabled !== undefined) fxState.enabled = m.enabled ? 1 : 0;
+      if (m.worldReady !== undefined) fxState.worldReady = m.worldReady ? 1 : 0;
       if (m.perfAuto !== undefined) fxState.perfAuto = m.perfAuto ? 1 : 0;
       if (m.lighting !== undefined) fxState.lighting = m.lighting ? 1 : 0;
       if (m.motionBlur !== undefined) fxState.motionBlur = m.motionBlur ? 1 : 0;
@@ -208,7 +210,8 @@
         }
 
         let Y = luma(col);
-        let shadowMask = clamp(1.0 - smoothstep(0.06, 0.44, Y), 0.0, 1.0);
+        let blackGuard = smoothstep(0.015, 0.095, Y);
+        let shadowMask = clamp(1.0 - smoothstep(0.06, 0.44, Y), 0.0, 1.0) * blackGuard;
         let highMask   = smoothstep(0.45, 0.96, Y);
         let shadowBounce = mix(
           vec3<f32>(0.028, 0.055, 0.072),
@@ -388,8 +391,8 @@
     const h = (t && t.desc && t.desc.size && t.desc.size.height) ? t.desc.size.height : 720;
     updatePerfGovernor(dtMs || 16.6, w, h);
 
-    // Stock passthrough when Experimental GTA 6 is not active, disabled, or failed validation
-    if (!fxState.enabled || gta6Failed) return false;
+    // Stock passthrough until PlayGTA5's 3D world is genuinely live (never tints boot/loading frames!)
+    if (!fxState.enabled || !fxState.worldReady || gta6Failed) return false;
     if (!fxState.lighting && !fxState.motionBlur && fxState.focusMix < 0.01) return false;
     if (!device || !canvasCtx || !t || !t.tex || !t.desc || !t.desc.size) return false;
     if ((t.desc.sampleCount || 1) > 1) return false;

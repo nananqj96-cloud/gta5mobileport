@@ -68,11 +68,11 @@ struct SharedEmulatorState {
         int sens = lookSensitivity < 20 ? 20 : (lookSensitivity > 300 ? 300 : lookSensitivity);
         if (devPerfAuto) {
             std::snprintf(buf, sizeof(buf),
-                          "/gta6/boot?mode=sandbox&vbx_gta6=1&vbx_perf_auto=1&low=0&fps=60&res=1920x1080&scale=0.92&shadows=1&fixed=1&vbx_sens=%d&args=-textureQuality=1,-shaderQuality=1,-shadowQuality=1,-noInGameDOF,-MSAA=0",
+                          "/gta6/boot?mode=sandbox&map=env_test&vbx_gta6=1&vbx_perf_auto=1&low=0&fps=60&scale=0.90&shadows=1&vbx_sens=%d",
                           sens);
         } else {
             std::snprintf(buf, sizeof(buf),
-                          "/gta6/boot?mode=sandbox&vbx_gta6=1&vbx_perf_auto=0&low=0&fps=0&res=1920x1080&scale=1.00&shadows=1&fixed=1&vbx_sens=%d",
+                          "/gta6/boot?mode=sandbox&map=env_test&vbx_gta6=1&vbx_perf_auto=0&low=0&fps=0&scale=1.00&shadows=1&vbx_sens=%d",
                           sens);
         }
         return std::string(buf);
@@ -119,10 +119,10 @@ public:
             WINHTTP_NO_PROXY_NAME,
             WINHTTP_NO_PROXY_BYPASS, 0);
         if (hSession_) {
-            DWORD maxConns = 32;
+            DWORD maxConns = 96;
             WinHttpSetOption(hSession_, WINHTTP_OPTION_MAX_CONNS_PER_SERVER,
                              &maxConns, sizeof(maxConns));
-            WinHttpSetTimeouts(hSession_, 10000, 12000, 15000, 30000);
+            WinHttpSetTimeouts(hSession_, 15000, 20000, 30000, 60000);
         }
 
         listenSock_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -154,7 +154,7 @@ public:
             port_ = ntohs(addr.sin_port);
         }
 
-        if (listen(listenSock_, 64) != 0) {
+        if (listen(listenSock_, 128) != 0) {
             closesocket(listenSock_);
             listenSock_ = INVALID_SOCKET;
             return false;
@@ -391,7 +391,7 @@ private:
 
         // Parse selected headers
         size_t contentLength = 0;
-        std::string reqRange, reqIfNoneMatch, reqIfModSince, reqAcceptEncoding;
+        std::string reqRange, reqIfNoneMatch, reqIfModSince, reqAcceptEncoding, reqContentType;
         size_t pos = (firstLineEnd == std::string::npos) ? hdrBlock.size() : firstLineEnd + 2;
         while (pos < hdrBlock.size()) {
             size_t next = hdrBlock.find("\r\n", pos);
@@ -411,10 +411,12 @@ private:
             else if (k == "if-none-match") reqIfNoneMatch = v;
             else if (k == "if-modified-since") reqIfModSince = v;
             else if (k == "accept-encoding") reqAcceptEncoding = v;
+            else if (k == "content-type") reqContentType = v;
         }
 
-        // Read remaining POST body
-        if (contentLength > 0 && contentLength <= 262144) {
+        // Read remaining POST body (up to 8 MB so playgta5.com POST /data/batch range requests pass cleanly!)
+        if (contentLength > 0 && contentLength <= 8 * 1024 * 1024) {
+            body.reserve(contentLength);
             while (body.size() < contentLength) {
                 int n = recv(client, buf, sizeof(buf), 0);
                 if (n <= 0) break;
@@ -546,7 +548,7 @@ private:
         }
 
         // 7. Root-relative transparent streaming passthrough to https://playgta5.com
-        ProxyStreamUpstream(client, method, upstreamTarget, reqRange, reqIfNoneMatch, reqIfModSince, reqAcceptEncoding, headOnly);
+        ProxyStreamUpstream(client, method, upstreamTarget, reqRange, reqIfNoneMatch, reqIfModSince, reqAcceptEncoding, reqContentType, body, headOnly);
     }
 
     void ServeEmbedded(SOCKET client, const std::string& assetPath, bool headOnly, bool noCache) {
@@ -989,7 +991,9 @@ private:
             return;
         }
 
-        // Request identity encoding so we can inject pc_overlay.js cleanly into plain UTF-8 HTML
+        // Request identity encoding + enable WinHTTP auto-decompression so HTML injection is always plain UTF-8
+        DWORD decompFlags = WINHTTP_DECOMPRESSION_FLAG_ALL;
+        WinHttpSetOption(hReq, WINHTTP_OPTION_DECOMPRESSION, &decompFlags, sizeof(decompFlags));
         WinHttpAddRequestHeaders(
             hReq,
             L"Accept: text/html,application/xhtml+xml,*/*;q=0.9\r\n"
@@ -1075,6 +1079,8 @@ private:
             SendResponse(client, 502, "Bad Gateway", "text/plain", "Open failed", 11);
             return;
         }
+        DWORD decompFlags = WINHTTP_DECOMPRESSION_FLAG_ALL;
+        WinHttpSetOption(hReq, WINHTTP_OPTION_DECOMPRESSION, &decompFlags, sizeof(decompFlags));
         WinHttpAddRequestHeaders(hReq, L"Accept-Encoding: identity\r\n",
                                  static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD);
 
@@ -1180,6 +1186,8 @@ private:
                              const std::string& reqIfNoneMatch,
                              const std::string& reqIfModSince,
                              const std::string& reqAcceptEncoding,
+                             const std::string& reqContentType,
+                             const std::string& reqBody,
                              bool headOnly) {
         if (!hSession_) {
             SendResponse(client, 502, "Bad Gateway", "text/plain", "Proxy offline", 13);
@@ -1203,18 +1211,26 @@ private:
             return;
         }
 
-        // Forward Range / caching / compression headers so WASM/DATA/BC7 assets fly at full speed!
+        // Forward Range / caching / compression / POST content-type headers so WASM/DATA/batch assets stream cleanly!
         std::string extraReq;
         if (!reqRange.empty()) extraReq += "Range: " + reqRange + "\r\n";
         if (!reqIfNoneMatch.empty()) extraReq += "If-None-Match: " + reqIfNoneMatch + "\r\n";
         if (!reqIfModSince.empty()) extraReq += "If-Modified-Since: " + reqIfModSince + "\r\n";
         if (!reqAcceptEncoding.empty()) extraReq += "Accept-Encoding: " + reqAcceptEncoding + "\r\n";
+        if (!reqContentType.empty()) extraReq += "Content-Type: " + reqContentType + "\r\n";
         if (!extraReq.empty()) {
             std::wstring wEx = Utf8ToWide(extraReq);
             WinHttpAddRequestHeaders(hReq, wEx.c_str(), static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD);
         }
 
-        if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
+        LPVOID sendPtr = (!reqBody.empty() && method == "POST")
+                             ? const_cast<char*>(reqBody.data())
+                             : WINHTTP_NO_REQUEST_DATA;
+        DWORD sendLen = (!reqBody.empty() && method == "POST")
+                            ? static_cast<DWORD>(reqBody.size())
+                            : 0;
+
+        if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, sendPtr, sendLen, sendLen, 0) ||
             !WinHttpReceiveResponse(hReq, nullptr)) {
             WinHttpCloseHandle(hReq);
             WinHttpCloseHandle(hConn);
@@ -1236,6 +1252,8 @@ private:
         std::string ce    = QueryWideHeaderUtf8(hReq, WINHTTP_QUERY_CONTENT_ENCODING);
         std::string etag  = QueryWideHeaderUtf8(hReq, WINHTTP_QUERY_ETAG);
         std::string cc    = QueryWideHeaderUtf8(hReq, WINHTTP_QUERY_CACHE_CONTROL);
+        std::string xRun  = QueryWideHeaderUtf8(hReq, WINHTTP_QUERY_CUSTOM, L"X-Run-Lengths");
+        std::string xUnc  = QueryWideHeaderUtf8(hReq, WINHTTP_QUERY_CUSTOM, L"X-Uncompressed-Length");
 
         if (ct.empty()) ct = "application/octet-stream";
 
@@ -1248,6 +1266,8 @@ private:
         if (!ce.empty())   hdr << "Content-Encoding: " << ce << "\r\n";
         if (!etag.empty()) hdr << "ETag: " << etag << "\r\n";
         if (!cc.empty())   hdr << "Cache-Control: " << cc << "\r\n";
+        if (!xRun.empty()) hdr << "X-Run-Lengths: " << xRun << "\r\n";
+        if (!xUnc.empty()) hdr << "X-Uncompressed-Length: " << xUnc << "\r\n";
         hdr << "Cross-Origin-Resource-Policy: same-origin\r\n"
             << "Cross-Origin-Embedder-Policy: require-corp\r\n"
             << "Connection: close\r\n\r\n";

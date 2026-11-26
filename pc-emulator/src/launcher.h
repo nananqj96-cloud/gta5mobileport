@@ -98,19 +98,13 @@ inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox 
  */
 inline std::string BuildExperimentalGta6PlayPath(const EmulatorConfig& cfg) {
     const int sens = std::max(20, std::min(300, cfg.lookSensitivity));
-    std::string url = "/gta6/boot?mode=sandbox&vbx_gta6=1";
+    std::string url = "/gta6/boot?mode=sandbox&map=env_test&vbx_gta6=1";
     url += "&vbx_perf_auto=" + std::string(cfg.devPerfAuto ? "1" : "0");
     url += "&low=0";
     url += "&fps=" + std::string(cfg.devPerfAuto ? "60" : "0");
-    url += "&res=1920x1080";
-    url += "&scale=" + std::string(cfg.devPerfAuto ? "0.92" : "1.00");
-    url += "&shadows=1&fixed=1";
+    url += "&scale=" + std::string(cfg.devPerfAuto ? "0.90" : "1.00");
+    url += "&shadows=1";
     url += "&vbx_sens=" + std::to_string(sens);
-    if (cfg.devPerfAuto) {
-        url += "&args=-textureQuality=1,-shaderQuality=1,-shadowQuality=1,-noInGameDOF,-MSAA=0";
-    } else {
-        url += "&args=-textureQuality=2,-shaderQuality=2,-shadowQuality=2";
-    }
     return url;
 }
 
