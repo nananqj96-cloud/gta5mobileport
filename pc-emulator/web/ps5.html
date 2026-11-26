@@ -1593,9 +1593,15 @@
       return;
     }
 
-    // Launching Emulated GTA VI (Foxxy Dev Target OR ALL Mode Simultaneous Preview!)
+    // Launching Emulated GTA VI (Experimental GTA 6 PlayGTA5 Skin OR Foxxy Dev Target OR ALL Mode!)
     if (item.id === 'gta6') {
       playPs5Sfx('confirm');
+      if (appState.isFoxxyDev && appState.devExpGta6 && appState.expGta6Url) {
+        showToast('Launching Experimental GTA 6 (Leonida Sandbox)...', '#F04A98');
+        const target = appState.expGta6Url + '&vbx_from=ps5';
+        setTimeout(() => { window.location.href = target; }, 340);
+        return;
+      }
       const hasCustom = appState.isFoxxyDev && appState.devGta6Enabled && !!appState.devGta6ExePath;
       if (hasCustom) {
         showToast('Launching GTA VI Developer Target...', '#ff3394');
@@ -2665,8 +2671,10 @@
         if (typeof s.resIndex === 'number') appState.resIndex = s.resIndex;
         if (typeof s.gta5Mode === 'number') appState.gta5Mode = s.gta5Mode;
         if (s.gta5Url) appState.gta5Url = s.gta5Url;
+        if (s.expGta6Url) appState.expGta6Url = s.expGta6Url;
         appState.isFoxxyDev = !!s.isFoxxyDev;
         appState.devGta6Enabled = !!s.devGta6Enabled;
+        appState.devExpGta6 = !!s.devExpGta6;
         appState.devGta6ExePath = s.devGta6ExePath || '';
       }
     } catch (e) {}

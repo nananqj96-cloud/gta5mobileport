@@ -741,6 +741,11 @@
   }
 
   async function launchGta6(alsoOpenGta5) {
+    if (st.isFoxxyDev && st.devExpGta6 && st.expGta6Url) {
+      showToast('Launching Experimental GTA 6 (Leonida Sandbox)...', '#F04A98');
+      setTimeout(() => { window.location.href = st.expGta6Url + '&vbx_from=viceos'; }, 340);
+      return;
+    }
     const hasCustom = st.isFoxxyDev && st.devGta6Enabled && !!st.devGta6ExePath;
     if (hasCustom) {
       showToast('Launching GTA VI Developer Target...', '#ffb830');
@@ -1534,8 +1539,10 @@
         if (typeof s.enableCheatMenu === 'boolean') st.enableCheatMenu = s.enableCheatMenu;
         if (typeof s.resIndex === 'number') st.resIndex = s.resIndex;
         if (s.gta5Url) st.gta5Url = s.gta5Url;
+        if (s.expGta6Url) st.expGta6Url = s.expGta6Url;
         st.isFoxxyDev = !!s.isFoxxyDev;
         st.devGta6Enabled = !!s.devGta6Enabled;
+        st.devExpGta6 = !!s.devExpGta6;
         st.devGta6ExePath = s.devGta6ExePath || '';
       }
     } catch (e) {}

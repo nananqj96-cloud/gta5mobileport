@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -41,12 +43,39 @@ struct SharedEmulatorState {
     // Foxxy Developer Mode (unlocked when logging in as "Foxxy")
     bool        isFoxxyDev         = false;
     bool        devGta6Enabled     = false;
+    bool        devExpGta6         = false;
+    bool        devPerfAuto        = true;
     std::string devGta6ExePath;
     bool        devFullOverlay     = true;
     bool        devFakeFpsEnabled  = false;
     int         devFakeFpsLimit    = 30;
     std::string customGta5PlayPath;
+    std::string customExpGta6PlayPath;
     bool        configDirtyFromWeb = false;
+
+    // Live in-game telemetry pushed by Experimental GTA 6 WebGPU worker (/vbx/api/perf)
+    double      liveGameFps        = 0.0;
+    double      liveGameFrameMs    = 0.0;
+    int         livePerfTier       = 0;
+    int         liveGameW          = 0;
+    int         liveGameH          = 0;
+    uint64_t    livePerfTickMs     = 0;
+
+    std::string BuildExpGta6PlayUrl() const {
+        if (!customExpGta6PlayPath.empty()) return customExpGta6PlayPath;
+        char buf[320];
+        int sens = lookSensitivity < 20 ? 20 : (lookSensitivity > 300 ? 300 : lookSensitivity);
+        if (devPerfAuto) {
+            std::snprintf(buf, sizeof(buf),
+                          "/play/?mode=sandbox&vbx_gta6=1&vbx_perf_auto=1&low=0&fps=60&res=1920x1080&scale=0.92&shadows=1&fixed=1&vbx_sens=%d&args=-textureQuality=1,-shaderQuality=1,-shadowQuality=1,-noInGameDOF,-MSAA=0",
+                          sens);
+        } else {
+            std::snprintf(buf, sizeof(buf),
+                          "/play/?mode=sandbox&vbx_gta6=1&vbx_perf_auto=0&low=0&fps=0&res=1920x1080&scale=1.00&shadows=1&fixed=1&vbx_sens=%d",
+                          sens);
+        }
+        return std::string(buf);
+    }
 
     std::string BuildGta5PlayUrl() const {
         if (!customGta5PlayPath.empty()) return customGta5PlayPath;
@@ -291,6 +320,20 @@ private:
         return true;
     }
 
+    static bool ExtractJsonDouble(const std::string& body, const char* key, double& out) {
+        std::string needle = std::string("\"") + key + "\"";
+        size_t p = body.find(needle);
+        if (p == std::string::npos) return false;
+        p = body.find(':', p + needle.size());
+        if (p == std::string::npos) return false;
+        ++p;
+        while (p < body.size() && std::isspace(static_cast<unsigned char>(body[p]))) ++p;
+        if (p >= body.size() || (!std::isdigit(static_cast<unsigned char>(body[p])) && body[p] != '-' && body[p] != '.'))
+            return false;
+        out = std::strtod(body.c_str() + p, nullptr);
+        return true;
+    }
+
     void AcceptLoop() {
         while (running_.load()) {
             sockaddr_in cli{};
@@ -448,6 +491,14 @@ private:
             HandleLaunchCustomExe(client);
             return;
         }
+        if (path == "/vbx/api/perf" && method == "POST") {
+            HandlePerfPost(client, body);
+            return;
+        }
+        if (path == "/vbx/user/gta6_intro.mp4") {
+            ServeUserIntroVideo(client, headOnly);
+            return;
+        }
 
         // 4. Embedded static web assets (/vbx/pc_overlay.js, /vbx/img/*.jpg, *.png)
         if (path.rfind("/vbx/", 0) == 0) {
@@ -455,7 +506,7 @@ private:
             return;
         }
 
-        // 5. GTA V Enhanced Play Route (/play or /play/) -> injects pc_overlay.js + COOP/COEP/CORP
+        // 5. GTA V Enhanced Play Route (/play or /play/) -> injects pc_overlay.js (+ gta6_experimental.js when vbx_gta6=1)
         if (path == "/play" || path == "/play/") {
             ProxyGta5Html(client, query, headOnly);
             return;
@@ -465,6 +516,19 @@ private:
         std::string upstreamTarget = target;
         if (path.rfind("/play/", 0) == 0) {
             upstreamTarget = target.substr(5); // keep leading '/'
+        }
+
+        // 6b. Experimental GTA 6 WebGPU post-processing & GTX 1050 perf governor hook
+        if (method == "GET" && upstreamTarget.find("wgpu_worker.js") != std::string::npos) {
+            bool expActive = false;
+            {
+                std::lock_guard<std::mutex> lk(*stateMu_);
+                expActive = shared_->isFoxxyDev && shared_->devExpGta6;
+            }
+            if (expActive) {
+                ProxyGta6WgpuWorker(client, upstreamTarget, headOnly);
+                return;
+            }
         }
 
         // 7. Root-relative transparent streaming passthrough to https://playgta5.com
@@ -518,14 +582,62 @@ private:
             << "\"resIndex\":" << st.resIndex << ","
             << "\"gta5Mode\":" << st.gta5Mode << ","
             << "\"gta5Url\":\"" << EscapeJson(st.BuildGta5PlayUrl()) << "\","
+            << "\"expGta6Url\":\"" << EscapeJson(st.BuildExpGta6PlayUrl()) << "\","
             << "\"isFoxxyDev\":" << (st.isFoxxyDev ? "true" : "false") << ","
             << "\"devGta6Enabled\":" << (st.devGta6Enabled ? "true" : "false") << ","
+            << "\"devExpGta6\":" << (st.devExpGta6 ? "true" : "false") << ","
+            << "\"devPerfAuto\":" << (st.devPerfAuto ? "true" : "false") << ","
             << "\"devGta6ExePath\":\"" << EscapeJson(st.devGta6ExePath) << "\","
             << "\"devFullOverlay\":" << (st.devFullOverlay ? "true" : "false") << ","
             << "\"devFakeFpsEnabled\":" << (st.devFakeFpsEnabled ? "true" : "false") << ","
             << "\"devFakeFpsLimit\":" << st.devFakeFpsLimit
             << "}";
         SendJson(client, oss.str());
+    }
+
+    void HandlePerfPost(SOCKET client, const std::string& body) {
+        double fps = 0.0, fms = 0.0;
+        int tier = 0, w = 0, h = 0;
+        ExtractJsonDouble(body, "fps", fps);
+        ExtractJsonDouble(body, "frameMs", fms);
+        ExtractJsonInt(body, "perfTier", tier);
+        ExtractJsonInt(body, "resW", w);
+        ExtractJsonInt(body, "resH", h);
+        {
+            std::lock_guard<std::mutex> lk(*stateMu_);
+            if (fps > 0.0 && fps < 1000.0) shared_->liveGameFps = fps;
+            if (fms > 0.0 && fms < 1000.0) shared_->liveGameFrameMs = fms;
+            shared_->livePerfTier = std::max(0, std::min(3, tier));
+            if (w > 0) shared_->liveGameW = w;
+            if (h > 0) shared_->liveGameH = h;
+            shared_->livePerfTickMs = GetTickCount64();
+        }
+        SendJson(client, "{\"ok\":true}");
+    }
+
+    void ServeUserIntroVideo(SOCKET client, bool headOnly) {
+        const char* appData = std::getenv("APPDATA");
+        std::string path = (appData && *appData)
+            ? (std::string(appData) + "\\ViceBoxX\\gta6_intro.mp4")
+            : "gta6_intro.mp4";
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f.is_open()) {
+            const char* msg = "No custom intro video";
+            SendResponse(client, 404, "Not Found", "text/plain", msg, std::strlen(msg),
+                         "Cache-Control: no-store\r\n", headOnly);
+            return;
+        }
+        std::streamsize sz = f.tellg();
+        if (sz <= 0 || sz > 64 * 1024 * 1024) {
+            const char* msg = "Invalid intro video";
+            SendResponse(client, 404, "Not Found", "text/plain", msg, std::strlen(msg), "", headOnly);
+            return;
+        }
+        f.seekg(0, std::ios::beg);
+        std::string data(static_cast<size_t>(sz), '\0');
+        if (!headOnly) f.read(&data[0], sz);
+        SendResponse(client, 200, "OK", "video/mp4", data.data(), data.size(),
+                     "Cache-Control: no-store\r\n", headOnly);
     }
 
     void HandleConfigPost(SOCKET client, const std::string& body) {
@@ -547,6 +659,7 @@ private:
             shared_->motionBlurStrength = std::max(0, std::min(100, iVal));
         }
         if (ExtractJsonBool(body, "optimizationMode", bVal)) shared_->optimizationMode = bVal;
+        if (ExtractJsonBool(body, "devPerfAuto", bVal)) shared_->devPerfAuto = bVal;
         if (ExtractJsonInt(body, "lookSensitivity", iVal)) {
             shared_->lookSensitivity = std::max(20, std::min(300, iVal));
         }
@@ -715,8 +828,11 @@ private:
             return;
         }
 
-        // Inject ViceBox X PC Enhancement Layer (<script src="/vbx/pc_overlay.js"></script>) right after <head>
-        const std::string injectTag = "\n<script src=\"/vbx/pc_overlay.js\"></script>\n";
+        // Inject ViceBox X PC Enhancement Layer (+ Experimental GTA 6 layer when vbx_gta6=1) right after <head>
+        std::string injectTag = "\n<script src=\"/vbx/pc_overlay.js\"></script>\n";
+        if (query.find("vbx_gta6=1") != std::string::npos) {
+            injectTag += "<script src=\"/vbx/gta6_experimental.js\"></script>\n";
+        }
         std::string lowerHtml = ToLowerAscii(html);
         size_t headPos = lowerHtml.find("<head");
         if (headPos != std::string::npos) {
@@ -738,6 +854,83 @@ private:
 
         SendResponse(client, 200, "OK", "text/html; charset=utf-8",
                      html.data(), html.size(), isolationHeaders, headOnly);
+    }
+
+    void ProxyGta6WgpuWorker(SOCKET client, const std::string& upstreamTarget, bool headOnly) {
+        if (!hSession_) {
+            SendResponse(client, 502, "Bad Gateway", "text/plain", "Proxy offline", 13);
+            return;
+        }
+        HINTERNET hConn = WinHttpConnect(hSession_, L"playgta5.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+        if (!hConn) {
+            SendResponse(client, 502, "Bad Gateway", "text/plain", "Connect failed", 14);
+            return;
+        }
+        std::wstring wTarget = Utf8ToWide(upstreamTarget);
+        HINTERNET hReq = WinHttpOpenRequest(
+            hConn, L"GET", wTarget.c_str(), nullptr,
+            L"https://playgta5.com/", WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+        if (!hReq) {
+            WinHttpCloseHandle(hConn);
+            SendResponse(client, 502, "Bad Gateway", "text/plain", "Open failed", 11);
+            return;
+        }
+        WinHttpAddRequestHeaders(hReq, L"Accept-Encoding: identity\r\n",
+                                 static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD);
+
+        std::string js;
+        bool ok = false;
+        if (WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) &&
+            WinHttpReceiveResponse(hReq, nullptr)) {
+            DWORD statusCode = 0, sz = sizeof(statusCode);
+            WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &sz, WINHTTP_NO_HEADER_INDEX);
+            if (statusCode >= 200 && statusCode < 400) {
+                DWORD avail = 0;
+                while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
+                    size_t oldSz = js.size();
+                    js.resize(oldSz + avail);
+                    DWORD rd = 0;
+                    if (!WinHttpReadData(hReq, &js[oldSz], avail, &rd) || rd == 0) {
+                        js.resize(oldSz);
+                        break;
+                    }
+                    js.resize(oldSz + rd);
+                    if (js.size() > 8 * 1024 * 1024) break;
+                }
+                ok = !js.empty();
+            }
+        }
+        WinHttpCloseHandle(hReq);
+        WinHttpCloseHandle(hConn);
+
+        if (!ok) {
+            SendResponse(client, 502, "Bad Gateway", "text/plain", "wgpu_worker fetch failed", 24);
+            return;
+        }
+
+        // Patch present() blit in wgpu_worker.js to route through __vbxGta6Present with automatic fallback
+        const EmbeddedAsset* patch = FindEmbeddedAsset("/vbx/gta6_wgpu_patch.js");
+        if (patch && patch->size > 0) {
+            size_t blitPos = js.find("if (!blit) makeBlit();");
+            if (blitPos != std::string::npos) {
+                size_t endPos = js.find("pass2.end();", blitPos);
+                if (endPos != std::string::npos) {
+                    size_t blockEnd = endPos + std::strlen("pass2.end();");
+                    std::string origBlock = js.substr(blitPos, blockEnd - blitPos);
+                    std::string wrapped =
+                        "const __vbxDt = lastPresentT ? (performance.now() - lastPresentT) : 16.6;\n"
+                        "if (!self.__vbxGta6Present || !self.__vbxGta6Present(device, canvasCtx, canvasFormat, getEncoder, t, __vbxDt, presentCount)) {\n" +
+                        origBlock + "\n}";
+                    js.replace(blitPos, blockEnd - blitPos, wrapped);
+                }
+            }
+            js.append("\n\n");
+            js.append(reinterpret_cast<const char*>(patch->data), patch->size);
+        }
+
+        SendResponse(client, 200, "OK", "application/javascript; charset=utf-8",
+                     js.data(), js.size(), "Cache-Control: no-store\r\n", headOnly);
     }
 
     void SendOfflineHtml(SOCKET client, const std::string& reason) {
