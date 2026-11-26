@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "embedded_assets.h"
@@ -67,11 +68,11 @@ struct SharedEmulatorState {
         int sens = lookSensitivity < 20 ? 20 : (lookSensitivity > 300 ? 300 : lookSensitivity);
         if (devPerfAuto) {
             std::snprintf(buf, sizeof(buf),
-                          "/play/?mode=sandbox&vbx_gta6=1&vbx_perf_auto=1&low=0&fps=60&res=1920x1080&scale=0.92&shadows=1&fixed=1&vbx_sens=%d&args=-textureQuality=1,-shaderQuality=1,-shadowQuality=1,-noInGameDOF,-MSAA=0",
+                          "/gta6/boot?mode=sandbox&vbx_gta6=1&vbx_perf_auto=1&low=0&fps=60&res=1920x1080&scale=0.92&shadows=1&fixed=1&vbx_sens=%d&args=-textureQuality=1,-shaderQuality=1,-shadowQuality=1,-noInGameDOF,-MSAA=0",
                           sens);
         } else {
             std::snprintf(buf, sizeof(buf),
-                          "/play/?mode=sandbox&vbx_gta6=1&vbx_perf_auto=0&low=0&fps=0&res=1920x1080&scale=1.00&shadows=1&fixed=1&vbx_sens=%d",
+                          "/gta6/boot?mode=sandbox&vbx_gta6=1&vbx_perf_auto=0&low=0&fps=0&res=1920x1080&scale=1.00&shadows=1&fixed=1&vbx_sens=%d",
                           sens);
         }
         return std::string(buf);
@@ -469,6 +470,11 @@ private:
             ServeEmbedded(client, "/vbx/gta6_updates.html", headOnly, true);
             return;
         }
+        // Dedicated non-COEP Experimental GTA 6 Startup Video Page (auto-plays z_RUhg96MiI -> hands off to /play/)
+        if (path == "/gta6/boot" || path == "/gta6/boot/") {
+            ServeEmbedded(client, "/vbx/gta6_startup.html", headOnly, true);
+            return;
+        }
 
         // 3. API Endpoints
         if (path == "/vbx/api/telemetry") {
@@ -495,8 +501,20 @@ private:
             HandlePerfPost(client, body);
             return;
         }
+        if (path == "/vbx/api/intro-status") {
+            HandleIntroStatus(client);
+            return;
+        }
+        if (path == "/vbx/api/intro-resolve") {
+            HandleIntroResolve(client);
+            return;
+        }
+        if (path == "/vbx/api/intro-media") {
+            HandleIntroMedia(client, query, reqRange, headOnly);
+            return;
+        }
         if (path == "/vbx/user/gta6_intro.mp4") {
-            ServeUserIntroVideo(client, headOnly);
+            ServeUserIntroVideo(client, reqRange, headOnly);
             return;
         }
 
@@ -615,29 +633,436 @@ private:
         SendJson(client, "{\"ok\":true}");
     }
 
-    void ServeUserIntroVideo(SOCKET client, bool headOnly) {
+    static std::string GetViceBoxDataDir() {
         const char* appData = std::getenv("APPDATA");
-        std::string path = (appData && *appData)
-            ? (std::string(appData) + "\\ViceBoxX\\gta6_intro.mp4")
-            : "gta6_intro.mp4";
-        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        std::string dir = (appData && *appData) ? (std::string(appData) + "\\ViceBoxX") : ".";
+        std::wstring wDir = Utf8ToWide(dir);
+        if (!wDir.empty()) CreateDirectoryW(wDir.c_str(), nullptr);
+        return dir;
+    }
+
+    static bool IsValidMp4Buffer(const std::string& data, size_t minBytes = 32768) {
+        if (data.size() < minBytes || data.size() > 64 * 1024 * 1024) return false;
+        // ISO BMFF box header has "ftyp" at offset 4 (MP4 / M4A / M4V)
+        return (data[4] == 'f' && data[5] == 't' && data[6] == 'y' && data[7] == 'p');
+    }
+
+    static bool IsValidMp4File(const std::string& filePath, size_t minBytes = 32768) {
+        std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+        if (!f.is_open()) return false;
+        std::streamoff sz = f.tellg();
+        if (sz < static_cast<std::streamoff>(minBytes) || sz > 64LL * 1024 * 1024) return false;
+        f.seekg(0, std::ios::beg);
+        char hdr[12]{};
+        f.read(hdr, 12);
+        if (f.gcount() < 12) return false;
+        return (hdr[4] == 'f' && hdr[5] == 't' && hdr[6] == 'y' && hdr[7] == 'p');
+    }
+
+    static bool AtomicWriteFile(const std::string& destPath, const std::string& data) {
+        std::string tmpPath = destPath + ".tmp";
+        {
+            std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) return false;
+            out.write(data.data(), static_cast<std::streamsize>(data.size()));
+            if (!out.good()) return false;
+        }
+        std::wstring wTmp = Utf8ToWide(tmpPath);
+        std::wstring wDst = Utf8ToWide(destPath);
+        return MoveFileExW(wTmp.c_str(), wDst.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    }
+
+    static void ServeLocalMediaFile(SOCKET client, const std::string& filePath, const char* mime,
+                                    const std::string& reqRange, bool headOnly) {
+        std::ifstream f(filePath, std::ios::binary | std::ios::ate);
         if (!f.is_open()) {
-            const char* msg = "No custom intro video";
+            const char* msg = "Not Found";
             SendResponse(client, 404, "Not Found", "text/plain", msg, std::strlen(msg),
                          "Cache-Control: no-store\r\n", headOnly);
             return;
         }
-        std::streamsize sz = f.tellg();
-        if (sz <= 0 || sz > 64 * 1024 * 1024) {
-            const char* msg = "Invalid intro video";
+        std::streamoff totalSz = f.tellg();
+        if (totalSz <= 0 || totalSz > 64LL * 1024 * 1024) {
+            const char* msg = "Invalid media file";
             SendResponse(client, 404, "Not Found", "text/plain", msg, std::strlen(msg), "", headOnly);
             return;
         }
-        f.seekg(0, std::ios::beg);
-        std::string data(static_cast<size_t>(sz), '\0');
-        if (!headOnly) f.read(&data[0], sz);
-        SendResponse(client, 200, "OK", "video/mp4", data.data(), data.size(),
-                     "Cache-Control: no-store\r\n", headOnly);
+
+        uint64_t total = static_cast<uint64_t>(totalSz);
+        uint64_t start = 0;
+        uint64_t end   = total - 1;
+        bool isPartial = false;
+
+        if (reqRange.rfind("bytes=", 0) == 0) {
+            std::string spec = reqRange.substr(6);
+            size_t comma = spec.find(',');
+            if (comma != std::string::npos) spec = spec.substr(0, comma);
+            size_t dash = spec.find('-');
+            if (dash != std::string::npos) {
+                std::string s1 = spec.substr(0, dash);
+                std::string s2 = spec.substr(dash + 1);
+                if (!s1.empty()) {
+                    start = std::strtoull(s1.c_str(), nullptr, 10);
+                    end = s2.empty() ? (total - 1) : std::strtoull(s2.c_str(), nullptr, 10);
+                    if (end >= total) end = total - 1;
+                    if (start <= end && start < total) isPartial = true;
+                } else if (!s2.empty()) {
+                    uint64_t suffix = std::strtoull(s2.c_str(), nullptr, 10);
+                    if (suffix > 0) {
+                        start = (suffix >= total) ? 0 : (total - suffix);
+                        end = total - 1;
+                        isPartial = true;
+                    }
+                }
+            }
+        }
+
+        uint64_t len = (end - start) + 1;
+        std::ostringstream hdr;
+        hdr << "HTTP/1.1 " << (isPartial ? "206 Partial Content" : "200 OK") << "\r\n"
+            << "Content-Type: " << mime << "\r\n"
+            << "Content-Length: " << len << "\r\n"
+            << "Accept-Ranges: bytes\r\n"
+            << "Cache-Control: no-store\r\n"
+            << "Cross-Origin-Resource-Policy: same-origin\r\n";
+        if (isPartial) {
+            hdr << "Content-Range: bytes " << start << "-" << end << "/" << total << "\r\n";
+        }
+        hdr << "Connection: close\r\n\r\n";
+        std::string hdrStr = hdr.str();
+        if (!SendAll(client, hdrStr.data(), hdrStr.size()) || headOnly) return;
+
+        f.seekg(static_cast<std::streamoff>(start), std::ios::beg);
+        std::vector<char> chunk(65536);
+        uint64_t remaining = len;
+        while (remaining > 0) {
+            size_t toRead = static_cast<size_t>(std::min<uint64_t>(remaining, chunk.size()));
+            f.read(chunk.data(), static_cast<std::streamsize>(toRead));
+            std::streamsize got = f.gcount();
+            if (got <= 0) break;
+            if (!SendAll(client, chunk.data(), static_cast<size_t>(got))) break;
+            remaining -= static_cast<uint64_t>(got);
+        }
+    }
+
+    static std::string UnescapeJsonString(const std::string& raw) {
+        std::string out;
+        out.reserve(raw.size());
+        for (size_t i = 0; i < raw.size(); ++i) {
+            if (raw[i] == '\\' && i + 1 < raw.size()) {
+                char n = raw[i + 1];
+                if (n == '/' || n == '"' || n == '\\') {
+                    out.push_back(n);
+                    ++i;
+                } else if (n == 'u' && i + 5 < raw.size()) {
+                    std::string hex = raw.substr(i + 2, 4);
+                    unsigned long cp = std::strtoul(hex.c_str(), nullptr, 16);
+                    if (cp >= 0x20 && cp <= 0x7E) out.push_back(static_cast<char>(cp));
+                    i += 5;
+                } else {
+                    out.push_back(raw[i]);
+                }
+            } else {
+                out.push_back(raw[i]);
+            }
+        }
+        return out;
+    }
+
+    // Scans JSON format objects (depth-1 keys "itag" and "url") for preferred itags
+    static std::string ExtractFormatUrlByItags(const std::string& json, const std::vector<int>& preferredItags) {
+        std::vector<std::pair<int, std::string>> found;
+        size_t pos = 0;
+        while (pos < json.size()) {
+            size_t objStart = json.find('{', pos);
+            if (objStart == std::string::npos) break;
+            pos = objStart + 1;
+
+            int depth = 0;
+            bool inStr = false;
+            int itag = -1;
+            std::string url;
+            size_t i = objStart;
+            size_t limit = std::min<size_t>(json.size(), objStart + 12000);
+
+            for (; i < limit; ++i) {
+                char c = json[i];
+                if (inStr) {
+                    if (c == '\\' && i + 1 < limit) { ++i; continue; }
+                    if (c == '"') inStr = false;
+                    continue;
+                }
+                if (c == '{') { ++depth; continue; }
+                if (c == '}') {
+                    --depth;
+                    if (depth == 0) break;
+                    continue;
+                }
+                if (c == '"') {
+                    // Only inspect top-level (depth == 1) keys inside this object!
+                    if (depth == 1) {
+                        size_t kEnd = i + 1;
+                        while (kEnd < limit) {
+                            if (json[kEnd] == '\\' && kEnd + 1 < limit) { kEnd += 2; continue; }
+                            if (json[kEnd] == '"') break;
+                            ++kEnd;
+                        }
+                        if (kEnd < limit) {
+                            std::string key = json.substr(i + 1, kEnd - i - 1);
+                            size_t col = kEnd + 1;
+                            while (col < limit && (json[col] == ' ' || json[col] == '\t')) ++col;
+                            if (col < limit && json[col] == ':') {
+                                size_t v = col + 1;
+                                while (v < limit && (json[v] == ' ' || json[v] == '\t')) ++v;
+                                if (key == "itag" && v < limit) {
+                                    if (json[v] == '"') ++v;
+                                    if (v < limit && std::isdigit(static_cast<unsigned char>(json[v]))) {
+                                        itag = std::atoi(json.c_str() + v);
+                                    }
+                                } else if (key == "url" && v < limit && json[v] == '"') {
+                                    size_t q2 = v + 1;
+                                    while (q2 < limit) {
+                                        if (json[q2] == '\\' && q2 + 1 < limit) { q2 += 2; continue; }
+                                        if (json[q2] == '"') break;
+                                        ++q2;
+                                    }
+                                    if (q2 < limit && q2 > v + 8) {
+                                        std::string u = UnescapeJsonString(json.substr(v + 1, q2 - v - 1));
+                                        if (u.rfind("https://", 0) == 0 || u.rfind("http://", 0) == 0) {
+                                            url = std::move(u);
+                                        }
+                                        i = q2;
+                                        continue;
+                                    }
+                                }
+                            }
+                            i = kEnd;
+                            continue;
+                        }
+                    }
+                    inStr = true;
+                }
+            }
+
+            if (depth == 0 && itag > 0 && !url.empty()) {
+                found.emplace_back(itag, url);
+                pos = i + 1;
+            }
+        }
+
+        for (int want : preferredItags) {
+            for (const auto& kv : found) {
+                if (kv.first == want) return kv.second;
+            }
+        }
+        return {};
+    }
+
+    bool WinHttpFetchUrl(const std::string& url, const std::string& method,
+                         const std::string& postBody, const std::wstring& extraHeaders,
+                         std::string& outBody, size_t maxBytes, int timeoutMs) {
+        if (!hSession_) return false;
+        outBody.clear();
+
+        std::wstring wUrl = Utf8ToWide(url);
+        URL_COMPONENTSW uc{};
+        uc.dwStructSize = sizeof(uc);
+        wchar_t hostBuf[256]{};
+        wchar_t pathBuf[8192]{};
+        uc.lpszHostName = hostBuf;
+        uc.dwHostNameLength = static_cast<DWORD>(sizeof(hostBuf) / sizeof(wchar_t));
+        uc.lpszUrlPath = pathBuf;
+        uc.dwUrlPathLength = static_cast<DWORD>(sizeof(pathBuf) / sizeof(wchar_t));
+
+        if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &uc)) {
+            return false;
+        }
+        std::wstring host(uc.lpszHostName, uc.dwHostNameLength);
+        std::wstring pathAndQuery(uc.lpszUrlPath, uc.dwUrlPathLength);
+        if (pathAndQuery.empty()) pathAndQuery = L"/";
+        bool isHttps = (uc.nScheme == INTERNET_SCHEME_HTTPS);
+
+        HINTERNET hConn = WinHttpConnect(hSession_, host.c_str(), uc.nPort, 0);
+        if (!hConn) return false;
+
+        std::wstring wMethod = Utf8ToWide(method);
+        HINTERNET hReq = WinHttpOpenRequest(
+            hConn, wMethod.c_str(), pathAndQuery.c_str(), nullptr,
+            WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+            isHttps ? WINHTTP_FLAG_SECURE : 0);
+        if (!hReq) {
+            WinHttpCloseHandle(hConn);
+            return false;
+        }
+
+        WinHttpSetTimeouts(hReq, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+        DWORD redirPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        WinHttpSetOption(hReq, WINHTTP_OPTION_REDIRECT_POLICY, &redirPolicy, sizeof(redirPolicy));
+
+        if (!extraHeaders.empty()) {
+            WinHttpAddRequestHeaders(hReq, extraHeaders.c_str(), static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD);
+        }
+
+        BOOL sent = WinHttpSendRequest(
+            hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+            postBody.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(postBody.data()),
+            static_cast<DWORD>(postBody.size()),
+            static_cast<DWORD>(postBody.size()), 0);
+
+        bool ok = false;
+        if (sent && WinHttpReceiveResponse(hReq, nullptr)) {
+            DWORD statusCode = 0, scSz = sizeof(statusCode);
+            WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &scSz, WINHTTP_NO_HEADER_INDEX);
+            if (statusCode >= 200 && statusCode < 300) {
+                DWORD avail = 0;
+                while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
+                    if (outBody.size() + avail > maxBytes) {
+                        avail = static_cast<DWORD>(maxBytes - outBody.size());
+                        if (avail == 0) break;
+                    }
+                    size_t oldSz = outBody.size();
+                    outBody.resize(oldSz + avail);
+                    DWORD rd = 0;
+                    if (!WinHttpReadData(hReq, &outBody[oldSz], avail, &rd) || rd == 0) {
+                        outBody.resize(oldSz);
+                        break;
+                    }
+                    outBody.resize(oldSz + rd);
+                    if (outBody.size() >= maxBytes) break;
+                }
+                ok = !outBody.empty();
+            }
+        }
+
+        WinHttpCloseHandle(hReq);
+        WinHttpCloseHandle(hConn);
+        return ok;
+    }
+
+    std::string BuildIntroStatusJson() const {
+        std::string dir = GetViceBoxDataDir();
+        if (IsValidMp4File(dir + "\\gta6_intro.mp4", 16384)) {
+            return "{\"ready\":true,\"mode\":\"custom\",\"video\":\"/vbx/user/gta6_intro.mp4\"}";
+        }
+        if (IsValidMp4File(dir + "\\gta6_intro_z_RUhg96MiI_m.mp4", 32768)) {
+            return "{\"ready\":true,\"mode\":\"cached_mux\",\"video\":\"/vbx/api/intro-media?slot=m\"}";
+        }
+        if (IsValidMp4File(dir + "\\gta6_intro_z_RUhg96MiI_v.mp4", 32768) &&
+            IsValidMp4File(dir + "\\gta6_intro_z_RUhg96MiI_a.m4a", 8192)) {
+            return "{\"ready\":true,\"mode\":\"cached_av\",\"video\":\"/vbx/api/intro-media?slot=v\",\"audio\":\"/vbx/api/intro-media?slot=a\"}";
+        }
+        return "{\"ready\":false,\"mode\":\"none\"}";
+    }
+
+    bool TryCacheFromStreamJson(const std::string& json, const std::wstring& mediaHeaders, const std::string& dir) {
+        // 1. Prefer high-quality 720p60/1080p60 H.264 MP4 video + AAC M4A audio (zero artifacts, ~5 MB total!)
+        std::string vUrl = ExtractFormatUrlByItags(json, { 298, 136, 299, 135 });
+        std::string aUrl = ExtractFormatUrlByItags(json, { 140, 139 });
+        if (!vUrl.empty() && !aUrl.empty()) {
+            std::string vBuf, aBuf;
+            if (WinHttpFetchUrl(vUrl, "GET", "", mediaHeaders, vBuf, 20 * 1024 * 1024, 6500) &&
+                IsValidMp4Buffer(vBuf, 32768) &&
+                WinHttpFetchUrl(aUrl, "GET", "", mediaHeaders, aBuf, 4 * 1024 * 1024, 4500) &&
+                IsValidMp4Buffer(aBuf, 8192)) {
+                if (AtomicWriteFile(dir + "\\gta6_intro_z_RUhg96MiI_v.mp4", vBuf) &&
+                    AtomicWriteFile(dir + "\\gta6_intro_z_RUhg96MiI_a.m4a", aBuf)) {
+                    return true;
+                }
+            }
+        }
+        // 2. Fallback: muxed MP4 stream (itag 22 720p or itag 18 360p)
+        std::string mUrl = ExtractFormatUrlByItags(json, { 22, 18 });
+        if (!mUrl.empty()) {
+            std::string mBuf;
+            if (WinHttpFetchUrl(mUrl, "GET", "", mediaHeaders, mBuf, 16 * 1024 * 1024, 6500) &&
+                IsValidMp4Buffer(mBuf, 32768)) {
+                if (AtomicWriteFile(dir + "\\gta6_intro_z_RUhg96MiI_m.mp4", mBuf)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void HandleIntroStatus(SOCKET client) {
+        SendJson(client, BuildIntroStatusJson());
+    }
+
+    void HandleIntroResolve(SOCKET client) {
+        std::lock_guard<std::mutex> lk(introResolveMu_);
+        std::string already = BuildIntroStatusJson();
+        if (already.find("\"ready\":true") != std::string::npos) {
+            SendJson(client, already);
+            return;
+        }
+
+        std::string dir = GetViceBoxDataDir();
+        const std::wstring dlHdrs =
+            L"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\r\n"
+            L"Accept: */*\r\n";
+
+        // Method A: Direct YouTube InnerTube player lookup from the user's own PC IP (IP-matched, sub-second!)
+        {
+            const std::string bodyVr =
+                "{\"videoId\":\"z_RUhg96MiI\",\"context\":{\"client\":{"
+                "\"clientName\":\"ANDROID_VR\",\"clientVersion\":\"1.60.19\","
+                "\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest 3\","
+                "\"androidSdkVersion\":32,\"hl\":\"en\",\"gl\":\"US\"}}}";
+            const std::wstring vrHdrs =
+                L"Content-Type: application/json\r\n"
+                L"User-Agent: com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip\r\n"
+                L"Accept-Encoding: identity\r\n";
+            std::string resp;
+            if (WinHttpFetchUrl("https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                                "POST", bodyVr, vrHdrs, resp, 1024 * 1024, 3500)) {
+                if (TryCacheFromStreamJson(resp, dlHdrs, dir)) {
+                    SendJson(client, BuildIntroStatusJson());
+                    return;
+                }
+            }
+        }
+
+        // Method B: Live Invidious Public API (local=true proxies streams cleanly with zero IP mismatch!)
+        {
+            const char* kInvidiousHosts[] = {
+                "https://yt.chocolatemoo53.com",
+                "https://inv.nadeko.net",
+                "https://invidious.nerdvpn.de"
+            };
+            const std::wstring invHdrs =
+                L"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36\r\n"
+                L"Accept: application/json\r\n"
+                L"Accept-Encoding: identity\r\n";
+            for (const char* host : kInvidiousHosts) {
+                std::string apiUrl = std::string(host) + "/api/v1/videos/z_RUhg96MiI?local=true";
+                std::string resp;
+                if (WinHttpFetchUrl(apiUrl, "GET", "", invHdrs, resp, 1024 * 1024, 3500)) {
+                    if (TryCacheFromStreamJson(resp, dlHdrs, dir)) {
+                        SendJson(client, BuildIntroStatusJson());
+                        return;
+                    }
+                }
+            }
+        }
+
+        SendJson(client, "{\"ready\":false,\"fallback\":\"youtube\"}");
+    }
+
+    void HandleIntroMedia(SOCKET client, const std::string& query, const std::string& reqRange, bool headOnly) {
+        std::string dir = GetViceBoxDataDir();
+        if (query.find("slot=m") != std::string::npos) {
+            ServeLocalMediaFile(client, dir + "\\gta6_intro_z_RUhg96MiI_m.mp4", "video/mp4", reqRange, headOnly);
+        } else if (query.find("slot=a") != std::string::npos) {
+            ServeLocalMediaFile(client, dir + "\\gta6_intro_z_RUhg96MiI_a.m4a", "audio/mp4", reqRange, headOnly);
+        } else {
+            ServeLocalMediaFile(client, dir + "\\gta6_intro_z_RUhg96MiI_v.mp4", "video/mp4", reqRange, headOnly);
+        }
+    }
+
+    void ServeUserIntroVideo(SOCKET client, const std::string& reqRange, bool headOnly) {
+        std::string path = GetViceBoxDataDir() + "\\gta6_intro.mp4";
+        ServeLocalMediaFile(client, path, "video/mp4", reqRange, headOnly);
     }
 
     void HandleConfigPost(SOCKET client, const std::string& body) {
@@ -1072,6 +1497,7 @@ private:
     bool wsaInit_ = false;
     std::atomic<bool> running_{false};
     std::thread acceptThread_;
+    std::mutex introResolveMu_;
 };
 
 } // namespace vicebox

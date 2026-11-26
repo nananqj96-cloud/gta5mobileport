@@ -91,13 +91,14 @@ inline const char* kViewportNames[] = {
 inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)", "ViceOS Neo (Custom Console UI)" };
 
 /**
- * Builds the Experimental GTA 6 Sandbox play path ("/play/?mode=sandbox&vbx_gta6=1...")
+ * Builds the Experimental GTA 6 Sandbox boot path ("/gta6/boot?mode=sandbox&vbx_gta6=1...")
  * used ONLY when Developer Settings -> "Experimental GTA 6" is enabled.
- * Keeps GTX 1050 (2-4GB VRAM) targeting 60 FPS @ 1080p quietly when devPerfAuto is ON.
+ * Plays the real GTA 6 Rockstar Games Logo startup video (z_RUhg96MiI) before opening the
+ * GTA VI Main Menu & Sandbox, keeping GTX 1050 targeting 60 FPS @ 1080p when devPerfAuto is ON.
  */
 inline std::string BuildExperimentalGta6PlayPath(const EmulatorConfig& cfg) {
     const int sens = std::max(20, std::min(300, cfg.lookSensitivity));
-    std::string url = "/play/?mode=sandbox&vbx_gta6=1";
+    std::string url = "/gta6/boot?mode=sandbox&vbx_gta6=1";
     url += "&vbx_perf_auto=" + std::string(cfg.devPerfAuto ? "1" : "0");
     url += "&low=0";
     url += "&fps=" + std::string(cfg.devPerfAuto ? "60" : "0");

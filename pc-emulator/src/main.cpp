@@ -565,8 +565,8 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.6"
-                                         : "PS5 · XBOX · VICEOS  //  v2.6");
+                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.7"
+                                         : "PS5 · XBOX · VICEOS  //  v2.7");
     ImGui::PopFont();
 
     // Center Controls: LIVE EMBEDDED VIEWPORT TOOLBAR when game/console is active inside window,

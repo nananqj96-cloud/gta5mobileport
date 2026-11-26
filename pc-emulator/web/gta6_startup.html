@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Grand Theft Auto VI — Startup</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #000; color: #fff;
+    font-family: 'Bahnschrift', 'Segoe UI', system-ui, sans-serif;
+    user-select: none; cursor: pointer;
+  }
+  #stage {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    background: #000; overflow: hidden;
+  }
+  #intro-video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #000; display: none;
+  }
+  #yt-wrap {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; display: none;
+    pointer-events: none;
+  }
+  /* Slight scale crops YouTube edge titles/bars cleanly for pure cinema presentation */
+  #yt-player {
+    position: absolute; top: 50%; left: 50%;
+    width: 108vw; height: 108vh;
+    transform: translate(-50%, -50%);
+    border: 0; pointer-events: none;
+  }
+  #intro-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: none; background: #000;
+  }
+  /* Preload veil hides iframe buffering spinner until real playback starts */
+  #veil {
+    position: fixed; inset: 0; z-index: 20;
+    background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    transition: opacity 0.42s ease;
+    pointer-events: none;
+  }
+  #veil.hidden { opacity: 0; }
+  .veil-mark {
+    width: 48px; height: 48px; border-radius: 11px;
+    border: 2px solid rgba(240, 74, 152, 0.75);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 21px; color: #fff;
+    box-shadow: 0 0 28px rgba(240, 74, 152, 0.45);
+    animation: vbxPulse 1.4s ease-in-out infinite;
+  }
+  .veil-txt {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.24em;
+    color: rgba(255, 255, 255, 0.56); text-transform: uppercase;
+  }
+  @keyframes vbxPulse {
+    0%, 100% { transform: scale(0.96); opacity: 0.72; }
+    50%      { transform: scale(1.04); opacity: 1; }
+  }
+  /* Full-screen click capture shield so clicks ALWAYS skip cleanly even over iframe */
+  #skip-shield {
+    position: fixed; inset: 0; z-index: 30;
+    background: transparent; cursor: pointer;
+  }
+  #skip-pill {
+    position: fixed; right: 28px; bottom: 26px; z-index: 40;
+    padding: 8px 16px; border-radius: 999px;
+    background: rgba(10, 12, 22, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(8px);
+    font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.86);
+    opacity: 0; transition: opacity 0.45s ease;
+    pointer-events: none;
+  }
+  #skip-pill.show { opacity: 1; }
+  #fade-out {
+    position: fixed; inset: 0; z-index: 50;
+    background: #000; opacity: 0; pointer-events: none;
+    transition: opacity 0.42s ease;
+  }
+  #fade-out.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="intro-video" playsinline preload="auto"></video>
+  <audio id="intro-audio" preload="auto"></audio>
+  <div id="yt-wrap"><div id="yt-player"></div></div>
+  <canvas id="intro-canvas"></canvas>
+</div>
+<div id="veil">
+  <div class="veil-mark">R★</div>
+  <div class="veil-txt" id="veil-txt">LOADING STARTUP</div>
+</div>
+<div id="skip-shield" title="Click or press any key to skip"></div>
+<div id="skip-pill">PRESS ANY KEY OR CLICK TO SKIP</div>
+<div id="fade-out"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const YT_VIDEO_ID = 'z_RUhg96MiI'; // Official 16s GTA 6 Rockstar Games Logo Intro Animation
+  const INTRO_MAX_SEC = 16.3;
+
+  // Build destination /play/ URL preserving all launch parameters and marking intro complete
+  const qs = new URLSearchParams(window.location.search);
+  qs.set('vbx_gta6', '1');
+  if (!qs.has('mode')) qs.set('mode', 'sandbox');
+  qs.set('vbx_intro_done', '1');
+  qs.delete('vbx_skip_intro');
+  const NEXT_URL = '/play/?' + qs.toString();
+
+  const vidEl     = document.getElementById('intro-video');
+  const audEl     = document.getElementById('intro-audio');
+  const ytWrap    = document.getElementById('yt-wrap');
+  const cvEl      = document.getElementById('intro-canvas');
+  const veilEl    = document.getElementById('veil');
+  const veilTxt   = document.getElementById('veil-txt');
+  const skipPill  = document.getElementById('skip-pill');
+  const skipShield = document.getElementById('skip-shield');
+  const fadeOutEl = document.getElementById('fade-out');
+
+  let finished = false;
+  let activeTier = 'none'; // 'native' | 'youtube' | 'canvas'
+  let ytPlayer = null;
+  let ytSafetyTimer = 0;
+  let ytEndTimer = 0;
+  let syncRaf = 0;
+  let canvasRaf = 0;
+  let audioCtx = null;
+  let canSkip = false;
+
+  // Slight 350ms debounce before skip activates so accidental double-click from launcher doesn't skip frame 0
+  setTimeout(() => {
+    canSkip = true;
+    skipPill.classList.add('show');
+  }, 450);
+
+  function hideVeil() {
+    veilEl.classList.add('hidden');
+  }
+
+  function playSkipBeep() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const c = audioCtx || new AC();
+      if (c.state === 'suspended') c.resume();
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(520, c.currentTime);
+      g.gain.setValueAtTime(0.05, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.08);
+      o.connect(g); g.connect(c.destination);
+      o.start(); o.stop(c.currentTime + 0.09);
+    } catch (e) {}
+  }
+
+  function cleanupPlayers() {
+    if (ytSafetyTimer) { clearTimeout(ytSafetyTimer); ytSafetyTimer = 0; }
+    if (ytEndTimer) { clearTimeout(ytEndTimer); ytEndTimer = 0; }
+    if (syncRaf) { cancelAnimationFrame(syncRaf); syncRaf = 0; }
+    if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
+    try { vidEl.pause(); vidEl.removeAttribute('src'); vidEl.load(); } catch (e) {}
+    try { audEl.pause(); audEl.removeAttribute('src'); audEl.load(); } catch (e) {}
+    if (ytPlayer) {
+      try { ytPlayer.stopVideo(); } catch (e) {}
+      try { ytPlayer.destroy(); } catch (e) {}
+      ytPlayer = null;
+    }
+    if (audioCtx) {
+      try { audioCtx.close(); } catch (e) {}
+      audioCtx = null;
+    }
+  }
+
+  function finishIntro(byUser) {
+    if (finished) return;
+    finished = true;
+    if (byUser) playSkipBeep();
+    fadeOutEl.classList.add('on');
+    setTimeout(() => {
+      cleanupPlayers();
+      window.location.replace(NEXT_URL);
+    }, byUser ? 240 : 420);
+  }
+
+  // Universal skip: mouse click, any key, or DualSense/Xbox controller button
+  skipShield.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (canSkip) finishIntro(true);
+  });
+  window.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    if (canSkip) finishIntro(true);
+  }, true);
+
+  // Gamepad polling for A / B / Start skip
+  (function pollPad() {
+    if (finished) return;
+    if (canSkip && navigator.getGamepads) {
+      const pads = navigator.getGamepads();
+      for (let i = 0; i < pads.length; i++) {
+        const gp = pads[i];
+        if (!gp || !gp.buttons) continue;
+        if ((gp.buttons[0] && gp.buttons[0].pressed) ||
+            (gp.buttons[1] && gp.buttons[1].pressed) ||
+            (gp.buttons[9] && gp.buttons[9].pressed)) {
+          finishIntro(true);
+          return;
+        }
+      }
+    }
+    requestAnimationFrame(pollPad);
+  })();
+
+  // ==================== TIER 1 & 2: NATIVE FULLSCREEN MP4 (+ OPTIONAL SYNCED AAC) ====================
+  function playNativeMedia(videoUrl, audioUrl, onFailure) {
+    if (finished || activeTier !== 'none') return;
+    activeTier = 'native';
+
+    let started = false;
+    let failed = false;
+    let vidReady = false;
+    let audReady = !audioUrl;
+    let startSafety = 0;
+
+    function bail() {
+      if (failed || started || finished) return;
+      failed = true;
+      activeTier = 'none';
+      if (startSafety) clearTimeout(startSafety);
+      if (syncRaf) { cancelAnimationFrame(syncRaf); syncRaf = 0; }
+      vidEl.style.display = 'none';
+      try { vidEl.pause(); vidEl.removeAttribute('src'); } catch (e) {}
+      try { audEl.pause(); audEl.removeAttribute('src'); } catch (e) {}
+      onFailure();
+    }
+
+    function beginPlayback() {
+      if (started || failed || finished) return;
+      if (!vidReady || !audReady) return;
+      started = true;
+      if (startSafety) { clearTimeout(startSafety); startSafety = 0; }
+
+      vidEl.style.display = 'block';
+      vidEl.muted = !!audioUrl; // if separate AAC track exists, audio plays from audEl
+      vidEl.volume = 1.0;
+      vidEl.currentTime = 0;
+
+      const vProm = vidEl.play();
+      let aProm = null;
+      if (audioUrl) {
+        audEl.muted = false;
+        audEl.volume = 1.0;
+        audEl.currentTime = 0;
+        aProm = audEl.play();
+      }
+
+      Promise.resolve(vProm).then(() => {
+        hideVeil();
+        // Keep separate AAC track tightly locked to video clock (<80ms drift)
+        if (audioUrl) {
+          if (aProm && aProm.catch) aProm.catch(() => {});
+          const keepSync = () => {
+            if (finished || activeTier !== 'native') return;
+            if (!vidEl.paused && !audEl.paused) {
+              const drift = Math.abs(audEl.currentTime - vidEl.currentTime);
+              if (drift > 0.09) {
+                try { audEl.currentTime = vidEl.currentTime; } catch (e) {}
+              }
+            }
+            syncRaf = requestAnimationFrame(keepSync);
+          };
+          syncRaf = requestAnimationFrame(keepSync);
+        }
+      }).catch(() => {
+        // If unmuted autoplay was somehow blocked, try muted native playback before failing
+        vidEl.muted = true;
+        vidEl.play().then(() => hideVeil()).catch(bail);
+      });
+    }
+
+    vidEl.oncanplay = () => { vidReady = true; beginPlayback(); };
+    vidEl.onended   = () => { if (!finished) finishIntro(false); };
+    vidEl.onerror   = bail;
+
+    if (audioUrl) {
+      audEl.oncanplay = () => { audReady = true; beginPlayback(); };
+      audEl.onerror   = () => { audReady = true; audioUrl = null; beginPlayback(); };
+      audEl.src = audioUrl;
+      audEl.load();
+    }
+
+    vidEl.src = videoUrl;
+    vidEl.load();
+
+    // If native file does not become playable within 2.4s, move seamlessly to next tier
+    startSafety = setTimeout(() => {
+      if (!started && !finished) bail();
+    }, 2400);
+  }
+
+  // ==================== TIER 3: REAL FULLSCREEN YOUTUBE IFRAME PLAYER (z_RUhg96MiI) ====================
+  function startYouTubeTier() {
+    if (finished || activeTier !== 'none') return;
+    activeTier = 'youtube';
+    ytWrap.style.display = 'block';
+    veilTxt.textContent = 'ROCKSTAR GAMES';
+
+    let ytPlaying = false;
+    function fallbackToCanvas() {
+      if (finished || ytPlaying) return;
+      if (ytSafetyTimer) { clearTimeout(ytSafetyTimer); ytSafetyTimer = 0; }
+      if (ytEndTimer) { clearTimeout(ytEndTimer); ytEndTimer = 0; }
+      if (ytPlayer) {
+        try { ytPlayer.destroy(); } catch (e) {}
+        ytPlayer = null;
+      }
+      ytWrap.style.display = 'none';
+      activeTier = 'none';
+      startCanvasRockstarIntro();
+    }
+
+    // Never hang if offline or YouTube API fails to begin playback within 4.8s
+    ytSafetyTimer = setTimeout(() => {
+      if (!ytPlaying && !finished) fallbackToCanvas();
+    }, 4800);
+
+    function mountYtPlayer() {
+      if (finished || activeTier !== 'youtube') return;
+      try {
+        ytPlayer = new window.YT.Player('yt-player', {
+          videoId: YT_VIDEO_ID,
+          width: '100%',
+          height: '100%',
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            iv_load_policy: 3,
+            modestbranding: 1,
+            playsinline: 1,
+            rel: 0,
+            showinfo: 0,
+            origin: window.location.origin,
+            widget_referrer: window.location.href
+          },
+          events: {
+            onReady: (ev) => {
+              if (finished || activeTier !== 'youtube') return;
+              try {
+                const ifr = ev.target.getIframe();
+                if (ifr) {
+                  ifr.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+                  ifr.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
+                }
+                ev.target.unMute();
+                ev.target.setVolume(100);
+                ev.target.playVideo();
+              } catch (e) {
+                fallbackToCanvas();
+              }
+            },
+            onStateChange: (ev) => {
+              if (finished || activeTier !== 'youtube') return;
+              // YT.PlayerState.PLAYING === 1
+              if (ev.data === 1 && !ytPlaying) {
+                ytPlaying = true;
+                if (ytSafetyTimer) { clearTimeout(ytSafetyTimer); ytSafetyTimer = 0; }
+                // Wait 260ms so the initial fade-in from YouTube looks pure black -> intro
+                setTimeout(() => { if (!finished) hideVeil(); }, 260);
+                // Hard end-cut right at 16.0s so YouTube's post-video cards NEVER show
+                ytEndTimer = setTimeout(() => {
+                  if (!finished) finishIntro(false);
+                }, Math.round(INTRO_MAX_SEC * 1000));
+              }
+              // YT.PlayerState.ENDED === 0
+              if (ev.data === 0) {
+                finishIntro(false);
+              }
+            },
+            onError: () => {
+              fallbackToCanvas();
+            }
+          }
+        });
+      } catch (e) {
+        fallbackToCanvas();
+      }
+    }
+
+    if (window.YT && window.YT.Player) {
+      mountYtPlayer();
+    } else {
+      window.onYouTubeIframeAPIReady = mountYtPlayer;
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      tag.async = true;
+      tag.onerror = fallbackToCanvas;
+      document.head.appendChild(tag);
+    }
+  }
+
+  // ==================== TIER 4: AUTHENTIC 16s 60 FPS BLUR STUDIO GTA VI ROCKSTAR LOGO INTRO ====================
+  // Choreographed directly from the official Nov 2026 GTA VI 7th Rockstar Games Logo (z_RUhg96MiI):
+  //   0.0-3.2s : Black screen -> neon-pink gradient illuminates 6 crisp white wanted stars
+  //   3.2-5.0s : 6 stars accelerate and merge into 1 radiant star with neon shockwave
+  //   5.0-11.2s: Kinetic star-portal zoom through blue Americana -> emerald Leonida jungle/flamingos -> Vice neon coastline
+  //   11.2-14.8s: Pullback to star forming shining neon-pink-gradient Rockstar R* outline -> shifts cleanly to pure white
+  //   14.8-16.0s: Fade to black -> GTA VI Main Menu
+  function startRockstarAudio() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const t0 = audioCtx.currentTime;
+
+      // Master bus
+      const master = audioCtx.createGain();
+      master.gain.setValueAtTime(0.001, t0);
+      master.gain.linearRampToValueAtTime(0.32, t0 + 0.8);
+      master.gain.setValueAtTime(0.32, t0 + 13.8);
+      master.gain.exponentialRampToValueAtTime(0.0008, t0 + 15.8);
+      master.connect(audioCtx.destination);
+
+      // 1. Sub-bass atmospheric bed
+      const sub = audioCtx.createOscillator();
+      const subG = audioCtx.createGain();
+      sub.type = 'sawtooth';
+      sub.frequency.setValueAtTime(48, t0);
+      sub.frequency.linearRampToValueAtTime(55, t0 + 5.0);
+      sub.frequency.linearRampToValueAtTime(65.4, t0 + 11.4);
+      const subF = audioCtx.createBiquadFilter();
+      subF.type = 'lowpass';
+      subF.frequency.setValueAtTime(140, t0);
+      subF.frequency.linearRampToValueAtTime(340, t0 + 11.2);
+      subF.frequency.exponentialRampToValueAtTime(120, t0 + 15.5);
+      subG.gain.setValueAtTime(0.45, t0);
+      sub.connect(subF); subF.connect(subG); subG.connect(master);
+      sub.start(t0); sub.stop(t0 + 16.0);
+
+      // 2. Helicopter rotor chop (filtered noise modulated by 11 Hz LFO, 1.0s..10.8s)
+      const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 4, audioCtx.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+      const rotor = audioCtx.createBufferSource();
+      rotor.buffer = noiseBuf;
+      rotor.loop = true;
+      const rotorBp = audioCtx.createBiquadFilter();
+      rotorBp.type = 'bandpass';
+      rotorBp.frequency.setValueAtTime(210, t0);
+      rotorBp.Q.setValueAtTime(1.8, t0);
+      const rotorG = audioCtx.createGain();
+      rotorG.gain.setValueAtTime(0.001, t0);
+      rotorG.gain.linearRampToValueAtTime(0.24, t0 + 2.6);
+      rotorG.gain.setValueAtTime(0.22, t0 + 9.2);
+      rotorG.gain.exponentialRampToValueAtTime(0.001, t0 + 11.6);
+      const lfo = audioCtx.createOscillator();
+      const lfoG = audioCtx.createGain();
+      lfo.frequency.setValueAtTime(10.5, t0);
+      lfoG.gain.setValueAtTime(0.18, t0);
+      lfo.connect(lfoG); lfoG.connect(rotorG.gain);
+      rotor.connect(rotorBp); rotorBp.connect(rotorG); rotorG.connect(master);
+      rotor.start(t0 + 0.5); lfo.start(t0 + 0.5);
+      rotor.stop(t0 + 12.0); lfo.stop(t0 + 12.0);
+
+      // 3. Distant Vice City police siren sweep (2.2s..7.5s)
+      const siren = audioCtx.createOscillator();
+      const sirenG = audioCtx.createGain();
+      siren.type = 'sine';
+      siren.frequency.setValueAtTime(640, t0 + 2.2);
+      siren.frequency.linearRampToValueAtTime(1180, t0 + 3.6);
+      siren.frequency.linearRampToValueAtTime(620, t0 + 5.0);
+      siren.frequency.linearRampToValueAtTime(1140, t0 + 6.4);
+      sirenG.gain.setValueAtTime(0.0001, t0 + 2.2);
+      sirenG.gain.linearRampToValueAtTime(0.055, t0 + 3.4);
+      sirenG.gain.exponentialRampToValueAtTime(0.0001, t0 + 7.4);
+      siren.connect(sirenG); sirenG.connect(master);
+      siren.start(t0 + 2.2); siren.stop(t0 + 7.6);
+
+      // 4. Shimmering neon Rockstar emblem reveal chord at 11.3s
+      [220.0, 277.18, 329.63, 440.0, 659.25].forEach((freq, idx) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = idx % 2 === 0 ? 'triangle' : 'sine';
+        o.frequency.setValueAtTime(freq, t0 + 11.2);
+        g.gain.setValueAtTime(0.0001, t0 + 11.2);
+        g.gain.linearRampToValueAtTime(0.14 / (idx + 1), t0 + 12.1);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 15.6);
+        o.connect(g); g.connect(master);
+        o.start(t0 + 11.2); o.stop(t0 + 15.8);
+      });
+    } catch (e) {}
+  }
+
+  function drawStar(ctx, cx, cy, outerR, innerR, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = rot - Math.PI / 2 + (i * Math.PI) / 5;
+      const r = (i % 2 === 0) ? outerR : innerR;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+
+  function drawPalm(ctx, bx, by, h, lean, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(3, h * 0.045);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    const tx = bx + lean;
+    const ty = by - h;
+    ctx.quadraticCurveTo(bx + lean * 0.35, by - h * 0.55, tx, ty);
+    ctx.stroke();
+    for (let i = -3; i <= 3; i++) {
+      const ang = -Math.PI * 0.5 + i * 0.44;
+      const len = h * (0.34 - Math.abs(i) * 0.03);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.quadraticCurveTo(
+        tx + Math.cos(ang) * len * 0.6, ty + Math.sin(ang) * len * 0.45 - 8,
+        tx + Math.cos(ang) * len, ty + Math.sin(ang) * len + 16
+      );
+      ctx.lineWidth = Math.max(2, h * 0.025);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function startCanvasRockstarIntro() {
+    if (finished || activeTier !== 'none') return;
+    activeTier = 'canvas';
+    cvEl.style.display = 'block';
+    hideVeil();
+
+    const ctx = cvEl.getContext('2d');
+    if (!ctx) {
+      setTimeout(() => finishIntro(false), 1200);
+      return;
+    }
+
+    startRockstarAudio();
+    const t0 = performance.now();
+
+    function frame(now) {
+      if (finished || activeTier !== 'canvas') return;
+      const t = (now - t0) / 1000;
+      const w = cvEl.width = window.innerWidth;
+      const h = cvEl.height = window.innerHeight;
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      const minDim = Math.min(w, h);
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+
+      if (t < 3.2) {
+        // Phase 1: Neon-pink gradient sweeps across and illuminates 6 white stars
+        const p = t / 3.2;
+        const glow = ctx.createRadialGradient(cx, cy, 10, cx, cy, minDim * 0.65);
+        glow.addColorStop(0, `rgba(240, 74, 152, ${(0.34 * Math.sin(p * Math.PI)).toFixed(3)})`);
+        glow.addColorStop(0.55, `rgba(255, 122, 168, ${(0.14 * p).toFixed(3)})`);
+        glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, w, h);
+
+        const spacing = Math.min(w * 0.115, 118);
+        const starR = Math.min(minDim * 0.044, 34);
+        for (let i = 0; i < 6; i++) {
+          const appear = Math.max(0, Math.min(1, (t - i * 0.36) / 0.55));
+          if (appear <= 0) continue;
+          const sx = cx + (i - 2.5) * spacing;
+          ctx.save();
+          ctx.globalAlpha = appear;
+          ctx.shadowColor = '#F04A98';
+          ctx.shadowBlur = 26 * appear;
+          ctx.fillStyle = '#FFFFFF';
+          drawStar(ctx, sx, cy, starR * (0.7 + 0.3 * appear), starR * 0.42 * (0.7 + 0.3 * appear), 0);
+          ctx.fill();
+          ctx.restore();
+        }
+      } else if (t < 5.0) {
+        // Phase 2: All 6 stars fuse rapidly into 1 glowing central star
+        const p = (t - 3.2) / 1.8;
+        const ease = 1 - Math.pow(1 - p, 3);
+        const spacing = Math.min(w * 0.115, 118) * (1 - ease);
+        const starR = Math.min(minDim * 0.044, 34) * (1 + ease * 1.45);
+
+        const burst = ctx.createRadialGradient(cx, cy, 4, cx, cy, minDim * (0.25 + ease * 0.55));
+        burst.addColorStop(0, `rgba(255, 220, 240, ${(0.55 * ease).toFixed(3)})`);
+        burst.addColorStop(0.4, `rgba(240, 74, 152, ${(0.42 * ease).toFixed(3)})`);
+        burst.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = burst;
+        ctx.fillRect(0, 0, w, h);
+
+        for (let i = 0; i < 6; i++) {
+          const sx = cx + (i - 2.5) * spacing;
+          ctx.save();
+          ctx.shadowColor = '#F04A98';
+          ctx.shadowBlur = 34;
+          ctx.fillStyle = '#FFFFFF';
+          drawStar(ctx, sx, cy, starR, starR * 0.43, ease * 0.4);
+          ctx.fill();
+          ctx.restore();
+        }
+      } else if (t < 11.2) {
+        // Phase 3: Kinetic zoom through 3 official Blur Studio matte palettes
+        //   5.0-7.2s: Royal-blue Americana collage
+        //   7.2-9.2s: Emerald-green Leonida jungle & flamingos
+        //   9.2-11.2s: Vice Sunset / Neon skyline & speedboat coast
+        const seg = (t - 5.0) / 6.2;
+        const layerIdx = seg < 0.35 ? 0 : (seg < 0.68 ? 1 : 2);
+        const lp = layerIdx === 0 ? (seg / 0.35) : (layerIdx === 1 ? ((seg - 0.35) / 0.33) : ((seg - 0.68) / 0.32));
+        const zoom = 1.0 + lp * 0.42;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-cx, -cy);
+
+        const bg = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.max(w, h) * 0.72);
+        if (layerIdx === 0) {
+          bg.addColorStop(0, '#3B82F6');
+          bg.addColorStop(0.55, '#1D3E8A');
+          bg.addColorStop(1, '#0A1026');
+        } else if (layerIdx === 1) {
+          bg.addColorStop(0, '#34D399');
+          bg.addColorStop(0.55, '#0F6B4E');
+          bg.addColorStop(1, '#062019');
+        } else {
+          bg.addColorStop(0, '#FF9E6D');
+          bg.addColorStop(0.45, '#E03E8A');
+          bg.addColorStop(1, '#1A0B2E');
+        }
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+
+        // Stylized radial comic halftone burst rays
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(t * 0.14);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        for (let r = 0; r < 16; r++) {
+          ctx.rotate(Math.PI / 8);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(w, -42);
+          ctx.lineTo(w, 42);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+
+        if (layerIdx === 0) {
+          // Americana starburst & stylized eagle wings silhouette
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+          ctx.lineWidth = 3;
+          for (let k = 1; k <= 4; k++) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, minDim * 0.13 * k, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(255, 235, 190, 0.85)';
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - 38);
+          ctx.quadraticCurveTo(cx - 170, cy - 110, cx - 230, cy - 12);
+          ctx.quadraticCurveTo(cx - 120, cy + 28, cx, cy + 36);
+          ctx.quadraticCurveTo(cx + 120, cy + 28, cx + 230, cy - 12);
+          ctx.quadraticCurveTo(cx + 170, cy - 110, cx, cy - 38);
+          ctx.fill();
+        } else if (layerIdx === 1) {
+          // Leonida tropical palms & pink neon accent ring
+          drawPalm(ctx, cx - minDim * 0.36, h * 0.94, minDim * 0.62, 58, '#041E15');
+          drawPalm(ctx, cx + minDim * 0.38, h * 0.96, minDim * 0.66, -64, '#041E15');
+          ctx.strokeStyle = 'rgba(255, 110, 180, 0.65)';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, minDim * 0.22, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Vice Beach sunset & neon horizon skyline
+          ctx.fillStyle = 'rgba(255, 214, 112, 0.92)';
+          ctx.beginPath();
+          ctx.arc(cx, cy - 12, minDim * 0.20, 0, Math.PI * 2);
+          ctx.fill();
+          drawPalm(ctx, cx - minDim * 0.32, h * 0.92, minDim * 0.58, 46, '#140822');
+          drawPalm(ctx, cx + minDim * 0.34, h * 0.92, minDim * 0.56, -48, '#140822');
+        }
+
+        // Expanding white star portal frame
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.68)';
+        ctx.lineWidth = 4;
+        drawStar(ctx, cx, cy, minDim * (0.18 + lp * 0.38), minDim * (0.08 + lp * 0.16), lp * 0.35);
+        ctx.stroke();
+        ctx.restore();
+      } else if (t < 15.9) {
+        // Phase 4: Rapid pan-out from star -> glowing neon-pink Rockstar R* outline -> shifts cleanly to pure white!
+        const p = (t - 11.2) / 4.7;
+        const fadeOut = p > 0.80 ? Math.max(0, (1 - p) / 0.20) : 1;
+        const whiteMix = Math.max(0, Math.min(1, (p - 0.38) / 0.34));
+        const sc = 1.24 - 0.24 * Math.min(1, p * 2.4);
+
+        ctx.save();
+        ctx.globalAlpha = fadeOut;
+
+        // Ambient neon-pink halo behind emblem
+        const halo = ctx.createRadialGradient(cx, cy, 12, cx, cy, minDim * 0.48);
+        halo.addColorStop(0, `rgba(240, 74, 152, ${(0.34 * (1 - whiteMix * 0.45)).toFixed(3)})`);
+        halo.addColorStop(0.55, `rgba(255, 130, 175, ${(0.12 * (1 - whiteMix * 0.5)).toFixed(3)})`);
+        halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = halo;
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.translate(cx, cy);
+        ctx.scale(sc, sc);
+
+        const box = Math.min(minDim * 0.28, 210);
+        const rRad = box * 0.18;
+
+        // Neon-pink gradient outline transitioning smoothly to crisp pure white
+        const strokeGrad = ctx.createLinearGradient(-box * 0.5, -box * 0.5, box * 0.5, box * 0.5);
+        const r1 = Math.round(240 + (255 - 240) * whiteMix);
+        const g1 = Math.round(74  + (255 - 74)  * whiteMix);
+        const b1 = Math.round(152 + (255 - 152) * whiteMix);
+        const r2 = Math.round(255);
+        const g2 = Math.round(158 + (255 - 158) * whiteMix);
+        const b2 = Math.round(109 + (255 - 109) * whiteMix);
+        strokeGrad.addColorStop(0, `rgb(${r1},${g1},${b1})`);
+        strokeGrad.addColorStop(1, `rgb(${r2},${g2},${b2})`);
+
+        ctx.shadowColor = whiteMix > 0.7 ? 'rgba(255,255,255,0.65)' : '#F04A98';
+        ctx.shadowBlur = 32 - whiteMix * 14;
+        ctx.strokeStyle = strokeGrad;
+        ctx.lineWidth = Math.max(4, box * 0.038);
+        ctx.beginPath();
+        ctx.roundRect(-box * 0.5, -box * 0.5, box, box, rRad);
+        ctx.stroke();
+
+        // Bold italic R + 5-point Rockstar star outline
+        ctx.font = `900 ${Math.round(box * 0.62)}px Bahnschrift, Impact, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = Math.max(3, box * 0.028);
+        ctx.strokeStyle = strokeGrad;
+        ctx.strokeText('R', -box * 0.10, -box * 0.02);
+        if (whiteMix > 0.2) {
+          ctx.fillStyle = `rgba(255,255,255,${(whiteMix * 0.92).toFixed(3)})`;
+          ctx.fillText('R', -box * 0.10, -box * 0.02);
+        }
+
+        // Signature Rockstar bottom-right star
+        drawStar(ctx, box * 0.22, box * 0.20, box * 0.16, box * 0.068, 0);
+        ctx.strokeStyle = strokeGrad;
+        ctx.lineWidth = Math.max(2.5, box * 0.022);
+        ctx.stroke();
+        if (whiteMix > 0.2) {
+          ctx.fillStyle = `rgba(255,255,255,${(whiteMix * 0.95).toFixed(3)})`;
+          ctx.fill();
+        }
+
+        // Clean ROCKSTAR GAMES wordmark below
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, p * 2.2).toFixed(3)})`;
+        ctx.font = `800 ${Math.max(13, Math.round(box * 0.095))}px Bahnschrift, Segoe UI, sans-serif`;
+        ctx.fillText('R O C K S T A R   G A M E S', 0, box * 0.72);
+        ctx.restore();
+      } else {
+        finishIntro(false);
+        return;
+      }
+
+      canvasRaf = requestAnimationFrame(frame);
+    }
+
+    canvasRaf = requestAnimationFrame(frame);
+  }
+
+  // ==================== STARTUP ORCHESTRATOR ====================
+  async function boot() {
+    // 1. Instant local disk check (<2ms): user custom MP4 OR previously auto-cached real z_RUhg96MiI MP4
+    try {
+      const stRes = await fetch('/vbx/api/intro-status', { cache: 'no-store' });
+      if (stRes.ok) {
+        const st = await stRes.json();
+        if (st && st.ready && st.video) {
+          playNativeMedia(st.video, st.audio || null, startYouTubeTier);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // 2. Cold cache on first launch: race native server MP4 resolver (InnerTube + Invidious) vs 2.8s budget!
+    //    Even if the race times out to YouTube Tier 3, the server continues caching MP4 to disk in background
+    //    so EVERY subsequent launch plays instantly offline with zero YouTube chrome!
+    veilTxt.textContent = 'PREPARING INTRO VIDEO';
+    let resolvedInTime = false;
+    const resolvePromise = fetch('/vbx/api/intro-resolve', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+    const raceTimeout = new Promise((res) => setTimeout(() => res({ timeout: true }), 3200));
+    const result = await Promise.race([resolvePromise, raceTimeout]);
+    if (finished) return;
+
+    if (result && result.ready && result.video) {
+      resolvedInTime = true;
+      playNativeMedia(result.video, result.audio || null, startYouTubeTier);
+      return;
+    }
+
+    // 3. Real fullscreen YouTube IFrame Player API (z_RUhg96MiI) -> automatic fallback to Tier 4 Canvas intro
+    if (!resolvedInTime) {
+      startYouTubeTier();
+    }
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

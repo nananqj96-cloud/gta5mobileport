@@ -11,6 +11,13 @@
   const qs = new URLSearchParams(window.location.search);
   const isGta6Exp = qs.get('vbx_gta6') === '1';
   if (!isGta6Exp) return;
+
+  // Always run the dedicated non-COEP /gta6/boot startup video sequence (real z_RUhg96MiI
+  // Rockstar Games Logo Intro) on fresh launch unless already completed or switching maps!
+  if (qs.get('vbx_intro_done') !== '1' && qs.get('vbx_skip_intro') !== '1') {
+    window.location.replace('/gta6/boot' + window.location.search);
+    return;
+  }
   window.__VBX_GTA6_EXP_LOADED = true;
 
   // ==================== PHASE 6: QUIET GTX 1050 PERFORMANCE: AUTO PRE-INIT ====================
@@ -956,6 +963,12 @@
   // ==================== PHASE 3: CINEMATIC BOOT INTRO ====================
   function initBootIntro() {
     const intro = document.getElementById('vi-intro');
+    // Arrived cleanly from /gta6/boot (real GTA 6 Rockstar Logo startup video already played/skipped)
+    if (qs.get('vbx_intro_done') === '1' || qs.get('vbx_skip_intro') === '1') {
+      if (intro) intro.style.display = 'none';
+      if (qs.get('vbx_skip_intro') !== '1') showMainMenu();
+      return;
+    }
     const vid = document.getElementById('vi-intro-video');
     const cv = document.getElementById('vi-intro-canvas');
     let skipped = false;
@@ -1288,10 +1301,25 @@
         <div><div>FPS &amp; Frame-Time Counter</div><div style="font-size:11px;color:#9BA6BE;">Live ms &amp; FPS verification pill</div></div>
         <button class="vi-toggle ${cfg.showFpsCounter ? 'on' : ''}" data-set="showFpsCounter"></button>
       </div>
+
+      <div class="vi-row" style="border-bottom:none;padding-top:14px;">
+        <div><div>Startup Intro Video</div><div style="font-size:11px;color:#9BA6BE;">Official Rockstar Games GTA VI logo sequence</div></div>
+        <button id="vi-replay-intro" style="padding:7px 14px;border-radius:8px;border:1px solid rgba(240,74,152,0.55);background:rgba(240,74,152,0.22);color:#fff;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:pointer;">REPLAY INTRO</button>
+      </div>
     `;
 
     const closeBtn = container.querySelector('#vi-close-mset');
     if (closeBtn) closeBtn.addEventListener('click', () => container.classList.remove('open'));
+    const replayBtn = container.querySelector('#vi-replay-intro');
+    if (replayBtn) {
+      replayBtn.addEventListener('click', () => {
+        playUiTone(560, 0.08, 0.06, 'triangle');
+        const nextQs = new URLSearchParams(window.location.search);
+        nextQs.delete('vbx_intro_done');
+        nextQs.delete('vbx_skip_intro');
+        window.location.href = '/gta6/boot?' + nextQs.toString();
+      });
+    }
 
     container.querySelectorAll('.vi-toggle[data-set]').forEach((btn) => {
       btn.addEventListener('click', () => {
