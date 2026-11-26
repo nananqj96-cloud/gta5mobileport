@@ -742,8 +742,8 @@
 
   async function launchGta6(alsoOpenGta5) {
     if (st.isFoxxyDev && st.devExpGta6 && st.expGta6Url) {
-      showToast('Launching Experimental GTA 6 (Leonida Sandbox)...', '#F04A98');
-      setTimeout(() => { window.location.href = st.expGta6Url + '&vbx_from=viceos'; }, 340);
+      showToast('Launching Grand Theft Auto VI on ViceOS Neo...', '#F04A98');
+      setTimeout(() => { window.location.href = st.expGta6Url + '&vbx_console=viceos&vbx_from=viceos'; }, 340);
       return;
     }
     const hasCustom = st.isFoxxyDev && st.devGta6Enabled && !!st.devGta6ExePath;

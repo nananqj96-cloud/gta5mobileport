@@ -38,6 +38,26 @@ jobs:
           Remove-Item -Recurse -Force "$wvDir\pkg", $nupkg
           Get-ChildItem $wvDir
 
+      - name: Optimize Embedded GTA 6 Startup Intro MP4 (1080p60 H.264 High + AAC Hardware Decode)
+        shell: pwsh
+        run: |
+          $src = "pc-emulator\assets\video\gta6_intro.mp4"
+          $tmp = "pc-emulator\assets\video\gta6_intro_h264.mp4"
+          $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if (-not $ff) {
+            Write-Host "[INFO] ffmpeg not preinstalled — embedding source 4K60 AV1+AAC MP4 directly."
+          } else {
+            Write-Host "[INFO] Transcoding official startup MP4 to 1080p60 H.264 High + 160k AAC (+faststart) for GTX 1050 NVDEC..."
+            & ffmpeg -y -i $src -vf "scale=1920:1080:flags=lanczos" -r 60 -c:v libx264 -profile:v high -level 4.2 -pix_fmt yuv420p -crf 19 -preset fast -c:a aac -b:a 160k -ac 2 -movflags +faststart $tmp 2>&1 | Select-Object -Last 12
+            if ((Test-Path $tmp) -and ((Get-Item $tmp).Length -gt 500000)) {
+              Move-Item -Force $tmp $src
+              Write-Host ("[INFO] Optimized embedded intro MP4 size: {0:N2} MB" -f ((Get-Item $src).Length / 1MB))
+            } else {
+              Write-Host "[WARN] Transcode skipped — keeping original MP4."
+              if (Test-Path $tmp) { Remove-Item -Force $tmp }
+            }
+          }
+
       - name: Build Standalone ViceBox-GTA6-Emulator.exe
         shell: pwsh
         run: |
@@ -67,11 +87,12 @@ jobs:
       - name: Commit Built Standalone EXE to Current Branch
         shell: bash
         run: |
+          git checkout -- pc-emulator/assets/video/gta6_intro.mp4 || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f releases/ViceBox-GTA6-Emulator.exe
           if ! git diff --cached --quiet; then
-            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v2.5 (MSVC x64 + Embedded WebView2) [skip ci]"
+            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v2.8 (MSVC x64 + Embedded WebView2 + Native 1080p60 Intro) [skip ci]"
             git pull --rebase origin "${{ github.ref_name }}"
             git push origin HEAD:"${{ github.ref_name }}"
           fi

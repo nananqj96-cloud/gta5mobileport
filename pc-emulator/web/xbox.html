@@ -706,8 +706,8 @@
     if (game.id === 'gta6') {
       xboxSfx('ok');
       if (state.isFoxxyDev && state.devExpGta6 && state.expGta6Url) {
-        showToast('Launching Experimental GTA 6 (Leonida Sandbox)...');
-        setTimeout(() => { window.location.href = state.expGta6Url + '&vbx_from=xbox'; }, 340);
+        showToast('Launching Grand Theft Auto VI on Xbox...');
+        setTimeout(() => { window.location.href = state.expGta6Url + '&vbx_console=xbox&vbx_from=xbox'; }, 340);
         return;
       }
       const hasCustom = state.isFoxxyDev && state.devGta6Enabled && !!state.devGta6ExePath;

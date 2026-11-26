@@ -1597,8 +1597,8 @@
     if (item.id === 'gta6') {
       playPs5Sfx('confirm');
       if (appState.isFoxxyDev && appState.devExpGta6 && appState.expGta6Url) {
-        showToast('Launching Experimental GTA 6 (Leonida Sandbox)...', '#F04A98');
-        const target = appState.expGta6Url + '&vbx_from=ps5';
+        showToast('Launching Grand Theft Auto VI on PS5...', '#F04A98');
+        const target = appState.expGta6Url + '&vbx_console=ps5&vbx_from=ps5';
         setTimeout(() => { window.location.href = target; }, 340);
         return;
       }

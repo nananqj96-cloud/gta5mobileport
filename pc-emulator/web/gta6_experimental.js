@@ -21,7 +21,7 @@
   window.__VBX_GTA6_EXP_LOADED = true;
 
   // ==================== PHASE 6: QUIET GTX 1050 PERFORMANCE: AUTO PRE-INIT ====================
-  const STORE_KEY = 'vbx_gta6_exp_v26';
+  const STORE_KEY = 'vbx_gta6_exp_v28';
   const defaultSettings = {
     perfAuto: true,            // Default ON — quiet GTX 1050 60 FPS @ 1080p optimizer
     viceLighting: 92,          // 0..100
@@ -29,7 +29,8 @@
     bloom: 72,                 // 0..100
     sunShafts: 45,             // 0..100
     hairClothPhysics: true,    // Lucia ponytail + Jason jacket spring physics
-    minimap3D: true,           // 3D perspective tilt vs 2D flat radar
+    minimap3D: true,           // True 3D perspective iFruit radar vs 2D flat radar
+    minimapTheme: 'auto',      // 'auto' | 'light' | 'dark' (iFruit Day / Night plate)
     showCompanionRig: false,   // Optional live corner hair/cloth physics mini-monitor
     showFpsCounter: false,     // Dev FPS & frame-time ms pill
     character: 'lucia',        // 'lucia' | 'jason'
@@ -80,13 +81,17 @@
   const state = {
     phase: 'intro', // 'intro' | 'menu' | 'loading' | 'playing'
     worldReady: false,
-    loadPct: 0,
-    loadLabel: 'Initializing Leonida Sandbox Engine...',
+    realFramesSeen: 0,
+    loadPct: 2,
+    loadLabel: 'Initializing WebGPU & Streaming Engine...',
+    loadDl: '',
+    loadError: '',
+    choiceReady: false,
     // Player simulated spatial & kinesthetic state (driven by real WASD/mouse/controller inputs)
-    posX: 512,
-    posY: 560,
-    heading: -0.45,       // radians (0 = North)
-    smoothHeading: -0.45,
+    posX: 740,
+    posY: 840,
+    heading: -0.22,       // radians (0 = North)
+    smoothHeading: -0.22,
     speed: 0,             // 0..1 normalized
     smoothZoom: 1.0,
     camVelX: 0,
@@ -112,7 +117,7 @@
     focusShots: 2,
     // Minimap & Waypoint
     minimapExpanded: false,
-    waypoint: { x: 642, y: 318, name: 'OCEAN BEACH · VICE STRIP' },
+    waypoint: { x: 1086, y: 420, name: 'OCEAN BEACH · VICE STRIP' },
     // Pause Menu & Phone
     pauseOpen: false,
     pauseTab: 'map',     // 'character' | 'map' | 'brief' | 'progress' | 'settings'
@@ -125,12 +130,12 @@
     phoneSelectedIdx: 0,
     // Brief / Notifications
     briefLog: [
-      { time: '1:34 pm', title: 'LEONIDA SANDBOX', body: 'Welcome to Vice-Dale County. Press TAB for Loadout, P for Pause/Map, UP for Phone, C for Focus, N for 2D/3D Radar.' },
+      { time: '1:34 pm', title: 'LEONIDA SANDBOX', body: 'Welcome to Vice-Dale County. Hold TAB (L1) for Loadout, P (OPTIONS) for Pause/Map, ↑ for Phone, CAPS for Focus, M for 3D/2D Radar, F9 for PS5.' },
       { time: '1:35 pm', title: 'JASON DUVAL · WhatUp', body: 'Car is gassed up down on Ocean Beach. Meet me by the pink waypoint whenever you are ready.' }
     ],
-    // Telemetry from wgpu_worker.js (GTX 1050 live verification)
-    fps: 60.0,
-    frameMs: 14.2,
+    // Real Telemetry from wgpu_worker.js + game-fps (initialized to 0 so loading never exits early!)
+    fps: 0,
+    frameMs: 0,
     perfTier: 0,
     resW: 1920,
     resH: 1080,
@@ -187,28 +192,38 @@
   };
 
   const BLIPS = [
-    { id: 'home',   x: 472, y: 492, type: 'home',   color: '#F04A98', label: 'SAFEHOUSE · MOTEL' },
-    { id: 'gun',    x: 398, y: 615, type: 'gun',    color: '#FFFFFF', label: 'PAWN & AMMO' },
-    { id: 'garage', x: 560, y: 642, type: 'garage', color: '#67E8D0', label: 'VICE CUSTOMS' },
-    { id: 'beach',  x: 642, y: 318, type: 'star',   color: '#F04A98', label: 'OCEAN BEACH STRIP' },
-    { id: 'gym',    x: 610, y: 455, type: 'gym',    color: '#FFD166', label: 'VICE MUSCLE GYM' },
-    { id: 'diner',  x: 430, y: 395, type: 'food',   color: '#FF9E6D', label: 'RUSTY ANCHOR BAR' }
+    { id: 'home',   x: 690,  y: 740,  type: 'home',   color: '#F04A98', label: 'SAFEHOUSE · MOTEL' },
+    { id: 'gun',    x: 560,  y: 930,  type: 'gun',    color: '#FFFFFF', label: 'PAWN & AMMO' },
+    { id: 'garage', x: 860,  y: 980,  type: 'garage', color: '#67E8D0', label: 'VICE CUSTOMS' },
+    { id: 'beach',  x: 1086, y: 420,  type: 'star',   color: '#F04A98', label: 'OCEAN BEACH STRIP' },
+    { id: 'gym',    x: 1045, y: 690,  type: 'gym',    color: '#FFD166', label: 'VICE MUSCLE GYM' },
+    { id: 'diner',  x: 615,  y: 565,  type: 'food',   color: '#FF9E6D', label: 'RUSTY ANCHOR BAR' }
   ];
 
-  // ==================== WEBGPU FX & TELEMETRY CHANNELS ====================
+  // ==================== WEBGPU FX & REAL PLAYGTA5 ENGINE TELEMETRY CHANNELS ====================
   let fxChannel = null;
-  let perfChannel = null;
-  try { fxChannel = new BroadcastChannel('vbx-gta6-fx'); } catch (e) {}
   try {
-    perfChannel = new BroadcastChannel('vbx-gta6-perf');
-    perfChannel.onmessage = (ev) => {
+    fxChannel = new BroadcastChannel('vbx-gta6-fx');
+    fxChannel.onmessage = (ev) => {
       const d = ev.data;
-      if (!d) return;
+      if (!d || !d.perfReport) return;
       if (d.fps > 0) state.fps = d.fps;
       if (d.frameMs > 0) state.frameMs = d.frameMs;
-      if (d.perfTier !== undefined) state.perfTier = d.perfTier;
-      if (d.w > 0) { state.resW = d.w; state.resH = d.h; }
-      if (d.draws !== undefined) state.draws = d.draws;
+      if (d.tier !== undefined) state.perfTier = d.tier;
+      if (d.resW > 0) { state.resW = d.resW; state.resH = d.resH; }
+      if (d.presentCount > 0) state.realFramesSeen = Math.max(state.realFramesSeen, d.presentCount);
+    };
+  } catch (e) {}
+
+  try {
+    const fpsBc = new BroadcastChannel('game-fps');
+    fpsBc.onmessage = (ev) => {
+      const d = ev.data;
+      if (d && typeof d.fps === 'number' && d.fps > 0) {
+        state.fps = d.fps;
+        state.frameMs = 1000 / Math.max(1, d.fps);
+        state.realFramesSeen += 8;
+      }
     };
   } catch (e) {}
 
@@ -219,6 +234,19 @@
       if (!m) return;
       if (typeof m.pct === 'number') state.loadPct = Math.max(state.loadPct, m.pct);
       if (m.label) state.loadLabel = m.label;
+      if (m.dl) state.loadDl = m.dl;
+      if (m.choice) {
+        state.choiceReady = true;
+        if (state.phase === 'loading') triggerPlayGta5SandboxMode();
+      }
+      if (m.compiling !== undefined) {
+        state.loadLabel = m.compiling > 0 ? `Compiling WebGPU Shaders (${m.compiling} queued)...` : 'Finalizing World Stream...';
+      }
+      if (m.error) {
+        state.loadError = String(m.error);
+      } else if (m.gpuLost) {
+        state.loadError = 'WebGPU Device Lost: ' + String(m.gpuLost);
+      }
       if (m.world) {
         state.worldReady = true;
         state.loadPct = 100;
@@ -227,29 +255,30 @@
     };
   } catch (e) {}
 
-  function getWeatherSun() {
-    if (cfg.weather === 'noon')  return { u: 0.52, v: 0.08, light: 0.78, bloom: 0.55, shaft: 0.32 };
-    if (cfg.weather === 'night') return { u: 0.80, v: 0.14, light: 0.65, bloom: 1.15, shaft: 0.14 };
-    if (cfg.weather === 'storm') return { u: 0.35, v: 0.12, light: 0.52, bloom: 0.65, shaft: 0.18 };
-    return { u: 0.74, v: 0.16, light: 1.0, bloom: 0.85, shaft: 0.55 }; // sunset
+  function getWeatherParams() {
+    if (cfg.weather === 'noon')  return { tod: 13.0, warmth: 0.48, bloom: 0.58, rays: 0.36 };
+    if (cfg.weather === 'night') return { tod: 22.8, warmth: 0.42, bloom: 1.00, rays: 0.16 };
+    if (cfg.weather === 'storm') return { tod: 16.5, warmth: 0.32, bloom: 0.55, rays: 0.15 };
+    return { tod: 18.4, warmth: 0.66, bloom: 0.84, rays: 0.54 }; // Leonida Golden Hour Sunset
   }
 
   function syncFxToWgpu() {
     if (!fxChannel) return;
-    const ws = getWeatherSun();
+    const wp = getWeatherParams();
     try {
       fxChannel.postMessage({
         enabled: true,
         perfAuto: !!cfg.perfAuto,
-        velX: state.camVelX,
-        velY: state.camVelY,
-        speed: state.speed,
-        blurStrength: (cfg.motionBlur / 100) * 1.15,
-        lightStrength: (cfg.viceLighting / 100) * ws.light,
-        bloomStrength: (cfg.bloom / 100) * ws.bloom,
-        shaftStrength: (cfg.sunShafts / 100) * ws.shaft,
-        sunU: ws.u,
-        sunV: ws.v,
+        lighting: cfg.viceLighting > 0,
+        motionBlur: cfg.motionBlur > 0,
+        motionBlurStrength: (cfg.motionBlur / 100) * 0.85,
+        bloomStrength: (cfg.bloom / 100) * wp.bloom * 0.65,
+        warmth: (cfg.viceLighting / 100) * wp.warmth,
+        volumetricRays: (cfg.sunShafts / 100) * wp.rays,
+        camVelX: state.camVelX,
+        camVelY: state.camVelY,
+        speedNorm: state.speed,
+        timeOfDay: wp.tod,
         focusMix: state.focusMix
       });
     } catch (e) {}
@@ -418,116 +447,303 @@
     ctx.restore();
   }
 
-  // ==================== PHASE 4: PRE-BAKED ULTRA-CHEAP VICE CITY / LEONIDA MINIMAP ====================
-  const MAP_SIZE = 1024;
-  let bakedMapCanvas = null;
+  // ==================== PHASE 4: AUTHENTIC 2026 GTA VI iFRUIT 3D/2D MINIMAP ENGINE ====================
+  // Direct faithful recreation of the November 2026 PS5 GTA VI iFruit CarPlay / Apple Maps radar:
+  //  - Dual-theme 1536x1536 vector Vice-Dale County / Vice Beach map (Daylight Light Plate + Nighttime Dark Plate)
+  //  - Sweeping curved expressways, cloverleaf interchanges, causeway bridges with shadows, lane stripes,
+  //    organic roadside tree clusters, turquoise Biscayne Bay coastline, sandy Vice Beach, and 3D buildings
+  //  - True 3D perspective camera projection + extruded 3D building rooftops around player + luminous pink 3D GPS ribbon
+  const MAP_SIZE = 1536;
+  const bakedMaps = { light: null, dark: null };
+  const MAP_BUILDINGS = [];
 
-  function ensureBakedMap() {
-    if (bakedMapCanvas) return bakedMapCanvas;
-    bakedMapCanvas = document.createElement('canvas');
-    bakedMapCanvas.width = MAP_SIZE;
-    bakedMapCanvas.height = MAP_SIZE;
-    const c = bakedMapCanvas.getContext('2d');
+  // Deterministic architectural skyline dataset (used both on 2D baked plate and live 3D extruded rendering!)
+  (function initMapBuildings() {
+    let seed = 4219;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const districts = [
+      // Downtown Vice City high-rises (West of Biscayne Bay)
+      { x0: 470, x1: 770, y0: 240, y1: 1220, stepX: 62, stepY: 60, hMin: 16, hMax: 44, density: 0.72 },
+      // Ocean Beach Art Deco strip (East barrier island)
+      { x0: 940, x1: 1120, y0: 140, y1: 1320, stepX: 54, stepY: 54, hMin: 12, hMax: 34, density: 0.76 },
+      // Little Cuba / Mariana Midtown low-rise blocks
+      { x0: 140, x1: 450, y0: 280, y1: 1180, stepX: 68, stepY: 66, hMin: 8, hMax: 20, density: 0.58 }
+    ];
+    for (const d of districts) {
+      for (let gx = d.x0; gx < d.x1; gx += d.stepX) {
+        for (let gy = d.y0; gy < d.y1; gy += d.stepY) {
+          // Keep clear of major causeways & expressway corridors
+          if (Math.abs(gx - 560) < 34 || Math.abs(gx - 1035) < 28) continue;
+          if (Math.abs(gy - 340) < 34 || Math.abs(gy - 720) < 36 || Math.abs(gy - 1100) < 34) continue;
+          if (rand() > d.density) continue;
+          const w = 24 + Math.floor(rand() * 24);
+          const h = 22 + Math.floor(rand() * 24);
+          const ox = Math.floor((rand() - 0.5) * 10);
+          const oy = Math.floor((rand() - 0.5) * 10);
+          const elev = d.hMin + rand() * (d.hMax - d.hMin);
+          MAP_BUILDINGS.push({ x: gx + ox, y: gy + oy, w, h, elev });
+        }
+      }
+    }
+  })();
 
-    // Deep coastal ocean (#3B84A8 -> #5DA8C8 exact match to ref_06_phone_and_minimap.jpg)
-    c.fillStyle = '#3B84A8';
+  function getActiveMapTheme() {
+    if (cfg.minimapTheme === 'light') return 'light';
+    if (cfg.minimapTheme === 'dark') return 'dark';
+    return (cfg.weather === 'night' || cfg.weather === 'storm') ? 'dark' : 'light';
+  }
+
+  function ensureBakedMap(themeOverride) {
+    const theme = themeOverride || getActiveMapTheme();
+    if (bakedMaps[theme]) return bakedMaps[theme];
+
+    const cv = document.createElement('canvas');
+    cv.width = MAP_SIZE;
+    cv.height = MAP_SIZE;
+    const c = cv.getContext('2d');
+    const isDark = theme === 'dark';
+
+    // Exact 2026 PS5 GTA VI iFruit Map Color Palettes (Daylight Light Plate vs Nighttime Dark Plate)
+    const pal = isDark ? {
+      oceanDeep:   '#101929',
+      oceanShelf:  '#162338',
+      sand:        '#273040',
+      land:        '#222A39',
+      park:        '#1D2C31',
+      tree:        '#152229',
+      blockBase:   '#1A212E',
+      blockTop:    '#293245',
+      roadEdge:    '#5A657A',
+      roadFill:    '#404A5D',
+      hwyEdge:     '#717E96',
+      hwyFill:     '#4B566C',
+      hwyMedian:   '#2F384A',
+      laneDash:    'rgba(180,192,216,0.28)',
+      shadow:      'rgba(5,8,16,0.58)'
+    } : {
+      oceanDeep:   '#507E90',
+      oceanShelf:  '#6999AA',
+      sand:        '#CFC4AB',
+      land:        '#83898E',
+      park:        '#728A6D',
+      tree:        '#587056',
+      blockBase:   '#6E747A',
+      blockTop:    '#93999E',
+      roadEdge:    '#686E74',
+      roadFill:    '#ADA492',
+      hwyEdge:     '#5E646A',
+      hwyFill:     '#C4B8A1',
+      hwyMedian:   '#928977',
+      laneDash:    'rgba(255,252,244,0.42)',
+      shadow:      'rgba(32,38,44,0.34)'
+    };
+
+    // 1. Atlantic Ocean & Biscayne Shallows
+    c.fillStyle = pal.oceanDeep;
     c.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
 
-    // Shallow turquoise coastline shelf (#5DA8C8)
-    c.fillStyle = '#5DA8C8';
+    c.fillStyle = pal.oceanShelf;
     c.beginPath();
     c.moveTo(0, 0);
-    c.lineTo(760, 0);
-    c.quadraticCurveTo(805, 290, 745, 560);
-    c.quadraticCurveTo(690, 810, 730, MAP_SIZE);
+    c.lineTo(1235, 0);
+    c.bezierCurveTo(1290, 400, 1215, 760, 1175, 1120);
+    c.quadraticCurveTo(1155, 1340, 1210, MAP_SIZE);
     c.lineTo(0, MAP_SIZE);
     c.closePath();
     c.fill();
 
-    // Golden-pale Vice Beach sand strip (#D8CCA6)
-    c.fillStyle = '#D8CCA6';
+    // 2. Vice Beach Golden Sand Coastline
+    c.fillStyle = pal.sand;
     c.beginPath();
     c.moveTo(0, 0);
-    c.lineTo(712, 0);
-    c.quadraticCurveTo(752, 285, 694, 555);
-    c.quadraticCurveTo(645, 795, 682, MAP_SIZE);
+    c.lineTo(1168, 0);
+    c.bezierCurveTo(1220, 390, 1152, 760, 1114, 1110);
+    c.quadraticCurveTo(1096, 1330, 1146, MAP_SIZE);
     c.lineTo(0, MAP_SIZE);
     c.closePath();
     c.fill();
 
-    // Main Leonida / Vice-Dale sage-teal land mass (#6C9589 exact ref_06 palette)
-    c.fillStyle = '#6C9589';
+    // 3. Mainland & Vice Beach Island Landmass
+    c.fillStyle = pal.land;
     c.beginPath();
     c.moveTo(0, 0);
-    c.lineTo(682, 0);
-    c.quadraticCurveTo(720, 285, 666, 550);
-    c.quadraticCurveTo(618, 790, 654, MAP_SIZE);
+    c.lineTo(1128, 0);
+    c.bezierCurveTo(1178, 390, 1114, 755, 1078, 1105);
+    c.quadraticCurveTo(1062, 1325, 1108, MAP_SIZE);
     c.lineTo(0, MAP_SIZE);
     c.closePath();
     c.fill();
 
-    // Inner Biscayne bay canal dividing mainland & Vice Beach island
-    c.fillStyle = '#4B95B8';
+    // 4. Biscayne Bay Intracoastal Waterway (separating Downtown Vice City & Vice Beach)
+    c.fillStyle = pal.oceanShelf;
     c.beginPath();
-    c.moveTo(525, 0);
-    c.quadraticCurveTo(568, 280, 520, 540);
-    c.quadraticCurveTo(485, 760, 528, MAP_SIZE);
-    c.lineTo(576, MAP_SIZE);
-    c.quadraticCurveTo(535, 760, 568, 540);
-    c.quadraticCurveTo(612, 280, 570, 0);
+    c.moveTo(790, 0);
+    c.bezierCurveTo(855, 380, 775, 760, 815, 1140);
+    c.quadraticCurveTo(835, 1340, 800, MAP_SIZE);
+    c.lineTo(924, MAP_SIZE);
+    c.quadraticCurveTo(955, 1340, 934, 1140);
+    c.bezierCurveTo(894, 760, 972, 380, 908, 0);
     c.closePath();
     c.fill();
 
-    // Parks & golf greens (#557D73)
-    c.fillStyle = '#557D73';
+    // Starfish Island in the center of Biscayne Bay!
+    c.fillStyle = pal.land;
+    c.beginPath();
+    c.ellipse(856, 720, 56, 98, 0.08, 0, Math.PI * 2);
+    c.fill();
+
+    // 5. Lush Parks, Golf Links & Organic Coastal Tree Groves (exact GTA VI bo-5.jpg look)
+    c.fillStyle = pal.park;
     const parks = [
-      [140, 140, 150, 120], [330, 340, 95, 110], [600, 180, 58, 120],
-      [190, 650, 140, 130], [585, 425, 55, 95]
+      [180, 140, 230, 165], [470, 445, 110, 125], [965, 190, 86, 130],
+      [220, 960, 215, 195], [640, 820, 112, 140], [955, 860, 90, 160]
     ];
     for (const [x, y, w, h] of parks) {
+      c.beginPath(); c.roundRect(x, y, w, h, 26); c.fill();
+    }
+
+    // Organic rounded foliage clusters along highways & waterfront
+    c.fillStyle = pal.tree;
+    let tSeed = 773;
+    const tRand = () => { tSeed = (tSeed * 48271) % 2147483647; return tSeed / 2147483647; };
+    for (let i = 0; i < 165; i++) {
+      const tx = 120 + tRand() * 980;
+      const ty = 80 + tRand() * 1380;
+      if (tx > 795 && tx < 915) continue;
+      if (tx > 1105) continue;
+      const tr = 7 + tRand() * 11;
       c.beginPath();
-      c.roundRect(x, y, w, h, 18);
+      c.arc(tx, ty, tr, 0, Math.PI * 2);
+      c.arc(tx + tr * 0.65, ty + tr * 0.28, tr * 0.72, 0, Math.PI * 2);
+      c.arc(tx - tr * 0.52, ty + tr * 0.36, tr * 0.68, 0, Math.PI * 2);
       c.fill();
     }
 
-    // Urban city blocks with subtle 3D rooftop highlights (#2B313E + #3F4758)
-    for (let gx = 90; gx < 660; gx += 48) {
-      for (let gy = 70; gy < 920; gy += 48) {
-        // Skip canal & ocean
-        if (gx > 508 && gx < 576) continue;
-        if (gx > 642) continue;
-        const hash = ((gx * 37 + gy * 91) % 100);
-        if (hash < 24) continue;
-        const bw = 24 + (hash % 14);
-        const bh = 22 + ((hash * 3) % 14);
-        c.fillStyle = '#252B36';
-        c.fillRect(gx + 6, gy + 6, bw, bh);
-        c.fillStyle = '#3C4556';
-        c.fillRect(gx + 5, gy + 4, bw - 2, bh - 2);
+    // 6. Architectural City Blocks (Base shadows + crisp subtle rooftops)
+    for (const b of MAP_BUILDINGS) {
+      c.fillStyle = pal.shadow;
+      c.fillRect(b.x + 4, b.y + 5, b.w, b.h);
+      c.fillStyle = pal.blockBase;
+      c.fillRect(b.x, b.y, b.w, b.h);
+      c.fillStyle = pal.blockTop;
+      c.fillRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3);
+    }
+
+    // Helper for multi-layered crisp roads (curb + asphalt + optional center median / dashes)
+    const strokeRoad = (drawPath, width, isHwy) => {
+      c.lineCap = 'round';
+      c.lineJoin = 'round';
+      // Drop shadow for elevated expressways
+      if (isHwy) {
+        c.save();
+        c.translate(3, 5);
+        c.strokeStyle = pal.shadow;
+        c.lineWidth = width + 5;
+        drawPath(); c.stroke();
+        c.restore();
       }
+      // Crisp outer shoulder / curb
+      c.strokeStyle = isHwy ? pal.hwyEdge : pal.roadEdge;
+      c.lineWidth = width + 3.5;
+      drawPath(); c.stroke();
+      // Main road deck
+      c.strokeStyle = isHwy ? pal.hwyFill : pal.roadFill;
+      c.lineWidth = width;
+      drawPath(); c.stroke();
+      // Center divider / lane stripes on major arteries
+      if (isHwy) {
+        c.strokeStyle = pal.hwyMedian;
+        c.lineWidth = 2.4;
+        drawPath(); c.stroke();
+        c.save();
+        c.strokeStyle = pal.laneDash;
+        c.lineWidth = 1.2;
+        c.setLineDash([12, 10]);
+        drawPath(); c.stroke();
+        c.restore();
+      }
+    };
+
+    // 7. Secondary Surface Street Grid (varied organic urban layout)
+    for (let x = 180; x <= 760; x += 96) {
+      if (Math.abs(x - 560) < 35) continue;
+      strokeRoad(() => { c.beginPath(); c.moveTo(x, 60); c.lineTo(x, MAP_SIZE - 60); }, 10, false);
+    }
+    for (let y = 160; y <= 1380; y += 98) {
+      if (Math.abs(y - 340) < 40 || Math.abs(y - 720) < 40 || Math.abs(y - 1100) < 40) continue;
+      strokeRoad(() => { c.beginPath(); c.moveTo(80, y); c.lineTo(785, y); }, 10, false);
+      strokeRoad(() => { c.beginPath(); c.moveTo(930, y); c.lineTo(1095, y); }, 9, false);
     }
 
-    // Arterial streets (#3B424E)
-    c.strokeStyle = '#3B424E';
-    c.lineWidth = 6;
-    for (let x = 86; x <= 662; x += 48) {
-      if (x > 515 && x < 572) continue;
-      c.beginPath(); c.moveTo(x, 20); c.lineTo(x, MAP_SIZE - 20); c.stroke();
-    }
-    for (let y = 66; y <= 940; y += 48) {
-      c.beginPath(); c.moveTo(30, y); c.lineTo(665, y); c.stroke();
+    // 8. Sweeping Curved Highways, Cloverleaf Ramps, Causeways & Ocean Drive Expressway!
+    // Cloverleaf Interchange ramps at Downtown Junction (560, 720) & North Interchange (560, 340)
+    const drawInterchange = (ix, iy) => {
+      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        strokeRoad(() => {
+          c.beginPath();
+          c.arc(ix + dx * 48, iy + dy * 48, 34, 0, Math.PI * 2);
+        }, 9, false);
+      }
+    };
+    drawInterchange(560, 720);
+    drawInterchange(560, 340);
+
+    // Sweeping Ocean Beach Promenade Curve (East coast boulevard)
+    strokeRoad(() => {
+      c.beginPath();
+      c.moveTo(1062, 12);
+      c.bezierCurveTo(1110, 390, 1044, 760, 1012, 1110);
+      c.quadraticCurveTo(996, 1330, 1038, MAP_SIZE - 12);
+    }, 18, true);
+
+    // Three Iconic Biscayne Bay Causeway Bridges (North, Venetian/Starfish, MacArthur South)
+    for (const by of [340, 720, 1100]) {
+      strokeRoad(() => {
+        c.beginPath();
+        c.moveTo(50, by);
+        c.bezierCurveTo(420, by - 12, 740, by + 12, 1066, by);
+      }, 20, true);
     }
 
-    // Causeway bridges across Vice Bay + Ocean Drive expressway (#C5CDD4)
-    c.strokeStyle = '#C5CDD4';
-    c.lineWidth = 8;
-    for (const by of [210, 450, 738]) {
-      c.beginPath(); c.moveTo(86, by); c.lineTo(668, by); c.stroke();
-    }
-    c.beginPath(); c.moveTo(374, 10); c.lineTo(374, MAP_SIZE - 10); c.stroke();
-    c.beginPath(); c.moveTo(648, 20); c.quadraticCurveTo(682, 290, 636, 560); c.quadraticCurveTo(598, 790, 628, MAP_SIZE - 10); c.stroke();
+    // Main I-95 Leonida North-South Sweeping Curved Interstate (passes straight through player start!)
+    strokeRoad(() => {
+      c.beginPath();
+      c.moveTo(548, 0);
+      c.bezierCurveTo(596, 380, 520, 740, 568, 1120);
+      c.quadraticCurveTo(590, 1340, 550, MAP_SIZE);
+    }, 24, true);
 
-    return bakedMapCanvas;
+    // Coastal Bypass Diagonal Curve (Downtown -> Ocean Beach)
+    strokeRoad(() => {
+      c.beginPath();
+      c.moveTo(560, 1100);
+      c.bezierCurveTo(645, 930, 740, 820, 856, 720);
+      c.bezierCurveTo(940, 645, 1020, 520, 1070, 340);
+    }, 16, true);
+
+    bakedMaps[theme] = cv;
+    return cv;
+  }
+
+  // Smooth spline road-following GPS path from player -> destination (never a crude sharp L-bend!)
+  function buildGpsRoutePoints(sx, sy, tx, ty) {
+    const midX = sx * 0.42 + tx * 0.58;
+    const midY = sy * 0.55 + ty * 0.45;
+    // Route smoothly onto nearest major avenue / causeway curve
+    const pts = [];
+    const steps = 22;
+    const c1x = sx + (tx - sx) * 0.16;
+    const c1y = sy + (ty - sy) * 0.58;
+    const c2x = midX;
+    const c2y = ty + (sy - ty) * 0.18;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const u = 1 - t;
+      const px = u*u*u*sx + 3*u*u*t*c1x + 3*u*t*t*c2x + t*t*t*tx;
+      const py = u*u*u*sy + 3*u*u*t*c1y + 3*u*t*t*c2y + t*t*t*ty;
+      pts.push([px, py]);
+    }
+    return pts;
   }
 
   // ==================== SYNTHESIZED VICE CITY AUDIO FEEDBACK ====================
@@ -648,26 +864,42 @@
     .vi-clues { display: flex; gap: 5px; margin-top: 2px; }
     .vi-clue { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 4px; background: rgba(255,46,99,0.28); border: 1px solid rgba(255,46,99,0.75); color: #FFD1DC; }
 
-    /* Bottom-Left Minimap (Exact ref_04 + ref_06) */
+    /* Bottom-Left Authentic 2026 GTA VI iFruit 3D/2D Minimap (Matches Real PS5 Launch Build) */
     #vi-minimap-wrap { position: fixed; left: 24px; bottom: 22px; transition: width 0.25s ease, height 0.25s ease; }
-    #vi-minimap-shell { position: relative; width: 248px; height: 152px; border-radius: 10px; overflow: hidden; background: #3B84A8; border: 2px solid rgba(255,255,255,0.24); box-shadow: 0 10px 30px rgba(0,0,0,0.58); transition: width 0.25s, height 0.25s, border-color 0.2s; }
-    #vi-minimap-shell.expanded { width: 344px; height: 214px; }
-    #vi-minimap-shell.wanted { border-color: #FF2E63; animation: vi-map-wanted 0.8s infinite alternate; }
-    @keyframes vi-map-wanted { from { box-shadow: 0 0 0 2px rgba(255,46,99,0.55), 0 10px 28px rgba(0,0,0,0.6); } to { box-shadow: 0 0 18px 3px rgba(255,46,99,0.85), 0 10px 28px rgba(0,0,0,0.6); } }
-    #vi-minimap-canvas { width: 100%; height: 100%; display: block; }
-    #vi-minimap-north { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #14171F; border: 1.5px solid #fff; color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; transform: translate(-50%,-50%); pointer-events: none; z-index: 4; box-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-    #vi-minimap-gps { position: absolute; left: 8px; bottom: 6px; padding: 2px 7px; border-radius: 5px; background: rgba(14,17,28,0.78); font-size: 11px; font-weight: 800; color: #FF88C2; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; z-index: 4; }
-    #vi-minimap-mode { position: absolute; right: 7px; top: 6px; padding: 2px 6px; border-radius: 4px; background: rgba(14,17,28,0.72); font-size: 9px; font-weight: 800; color: #67E8D0; letter-spacing: 0.08em; z-index: 4; }
+    #vi-minimap-shell { position: relative; width: 258px; height: 154px; border-radius: 14px; overflow: hidden; background: #141D2E; border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 10px 30px rgba(0,0,0,0.58), inset 0 1px 0 rgba(255,255,255,0.14); transition: width 0.25s, height 0.25s, border-color 0.2s; }
+    #vi-minimap-shell.expanded { width: 356px; height: 214px; }
+    #vi-minimap-shell.wanted { border-color: rgba(255,46,99,0.85); animation: vi-map-wanted 0.8s infinite alternate; }
+    @keyframes vi-map-wanted { from { box-shadow: 0 0 0 1.5px rgba(255,46,99,0.55), 0 10px 28px rgba(0,0,0,0.6); } to { box-shadow: 0 0 18px 2px rgba(255,46,99,0.82), 0 10px 28px rgba(0,0,0,0.6); } }
+    #vi-minimap-stage { position: absolute; inset: 0; overflow: hidden; border-radius: 13px; perspective: 310px; }
+    #vi-minimap-canvas { position: absolute; left: 50%; top: 50%; width: 146%; height: 185%; transform: translate(-50%, -50%); transform-origin: 50% 66%; display: block; transition: transform 0.28s ease; }
+    #vi-minimap-shell.mode-3d #vi-minimap-canvas { transform: translate(-50%, -44%) rotateX(45deg) scale(1.06); }
+    #vi-minimap-horizon { position: absolute; left: 0; right: 0; top: 0; height: 34%; pointer-events: none; z-index: 2; opacity: 0; transition: opacity 0.25s; background: linear-gradient(180deg, rgba(16,24,38,0.58) 0%, rgba(16,24,38,0.16) 58%, rgba(16,24,38,0) 100%); }
+    #vi-minimap-shell.mode-3d #vi-minimap-horizon { opacity: 1; }
+    #vi-minimap-shell.theme-light #vi-minimap-horizon { background: linear-gradient(180deg, rgba(94,126,142,0.56) 0%, rgba(94,126,142,0.14) 58%, rgba(94,126,142,0) 100%); }
+    #vi-minimap-wanted-wash { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0; }
+    /* Crisp dark circular player chevron pinned near bottom-center (exact 2026 PS5 style) */
+    #vi-minimap-player { position: absolute; left: 50%; top: 75%; width: 20px; height: 20px; transform: translate(-50%, -50%); border-radius: 50%; background: #101319; box-shadow: 0 2px 6px rgba(0,0,0,0.72), 0 0 0 1px rgba(255,255,255,0.16); display: flex; align-items: center; justify-content: center; z-index: 5; pointer-events: none; transition: top 0.25s ease; }
+    #vi-minimap-shell:not(.mode-3d) #vi-minimap-player { top: 54%; }
+    /* Quiet top-left distance readout matching real GTA VI (0.43 mi) */
+    #vi-minimap-gps { position: absolute; left: 10px; top: 8px; font-size: 12.5px; font-weight: 700; color: rgba(255,255,255,0.96); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.55); z-index: 6; pointer-events: none; }
+    /* Orbiting black circular N badge & pink waypoint pin riding the outer edge of the rounded rectangle! */
+    #vi-minimap-north { position: absolute; width: 17px; height: 17px; border-radius: 50%; background: #0C0E14; border: 1px solid rgba(255,255,255,0.22); color: #fff; font-size: 9.5px; font-weight: 900; display: flex; align-items: center; justify-content: center; transform: translate(-50%,-50%); pointer-events: none; z-index: 8; box-shadow: 0 2px 6px rgba(0,0,0,0.75); }
+    #vi-minimap-wp-pin { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: #FF54A8; border: 1.5px solid rgba(255,255,255,0.85); transform: translate(-50%,-50%); pointer-events: none; z-index: 8; box-shadow: 0 0 10px rgba(255,84,168,0.95), 0 1px 4px rgba(0,0,0,0.65); }
 
     /* Optional Live Hair/Cloth Physics Companion Corner Rig */
-    #vi-phys-rig { position: fixed; left: 284px; bottom: 22px; width: 108px; height: 126px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 8px 22px rgba(0,0,0,0.5); display: none; }
+    #vi-phys-rig { position: fixed; left: 294px; bottom: 22px; width: 108px; height: 126px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 8px 22px rgba(0,0,0,0.5); display: none; }
     #vi-phys-rig.visible { display: block; }
     #vi-phys-lbl { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 9px; font-weight: 800; letter-spacing: 0.1em; color: #FFD1E6; text-shadow: 0 1px 3px #000; }
+
+    /* Subtle bottom-center pointer-lock & audio prompt (disappears automatically on click/lock) */
+    #vi-lock-hint { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); padding: 7px 16px; border-radius: 999px; background: rgba(10,14,26,0.74); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; color: rgba(255,255,255,0.9); pointer-events: none; transition: opacity 0.25s; opacity: 0; z-index: 99990; }
+    #vi-lock-hint.show { opacity: 1; }
 
     /* Bottom-Right Contextual Hints + Vehicle Scan Card (ref_06) */
     #vi-hints { position: fixed; right: 26px; bottom: 22px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
     .vi-hint-pill { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: 0.09em; color: rgba(255,255,255,0.88); text-shadow: 0 1px 4px rgba(0,0,0,0.85); }
     .vi-keycap { padding: 2px 6px; border-radius: 4px; background: #fff; color: #11131C; font-size: 10px; font-weight: 900; }
+    .vi-ps-cap { padding: 2px 6px; border-radius: 4px; background: rgba(0,112,209,0.88); border: 1px solid rgba(125,211,252,0.55); color: #fff; font-size: 10px; font-weight: 900; }
 
     /* Slide-in Vehicle Scan / Notification Toast */
     #vi-toast-stack { position: fixed; left: 26px; top: 96px; display: flex; flex-direction: column; gap: 8px; max-width: 310px; }
@@ -676,8 +908,8 @@
     .vi-toast-body { background: rgba(236, 232, 224, 0.94); color: #1A1822; padding: 8px 12px; font-size: 12px; font-weight: 600; line-height: 1.35; }
     @keyframes vi-slide-in { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
 
-    /* Live FPS / Frame-Time Counter Pill (Dev Verification on GTX 1050) */
-    #vi-fps-pill { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 5px 12px; border-radius: 8px; background: rgba(12,16,30,0.84); border: 1px solid rgba(103,232,208,0.45); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: #67E8D0; display: none; }
+    /* Live FPS / Frame-Time Counter Pill (docked cleanly below top-center CHEATS/HUD/PS5 bar) */
+    #vi-fps-pill { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: rgba(12,16,30,0.84); border: 1px solid rgba(103,232,208,0.45); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: #67E8D0; display: none; }
     #vi-fps-pill.visible { display: block; }
 
     /* ---- PHASE 4: REAL 8-CARD RECTANGULAR WEAPON WHEEL (Exact ref_03) ---- */
@@ -794,12 +1026,12 @@
               <span style="font-size:11px;color:#C8CDD6;">DISPLAY · FX</span>
             </button>
             <button class="vi-menu-btn" id="vi-btn-exit">
-              <span>← EXIT TO CONSOLE</span>
+              <span>← EXIT TO ${(qs.get('vbx_from') || qs.get('vbx_console') || 'ps5').toUpperCase()}</span>
               <span style="font-size:11px;color:#C8CDD6;">DASHBOARD</span>
             </button>
           </div>
           <div class="vi-menu-footer">
-            <span>VICEBOX X · WEBGPU SANDBOX</span>
+            <span>VICEBOX X · ${(qs.get('vbx_from') || qs.get('vbx_console') || 'ps5').toUpperCase()} WEBGPU SANDBOX</span>
             <span id="vi-menu-perf-note">GTX 1050 60 FPS TARGET</span>
           </div>
         </div>
@@ -814,10 +1046,12 @@
           <div style="font-size:12px;letter-spacing:0.18em;color:#F04A98;font-weight:800;">ENTERING VICE-DALE COUNTY · SANDBOX MODE</div>
           <div style="font-size:32px;font-weight:900;letter-spacing:0.06em;margin-top:4px;" id="vi-load-char">PLAYING AS ${CHARACTERS[cfg.character].name}</div>
           <div class="vi-load-track"><div class="vi-load-fill" id="vi-load-fill"></div></div>
-          <div style="display:flex;justify-content:space-between;font-size:12px;color:#C8CDD6;">
-            <span id="vi-load-lbl">Preparing WebGPU Vice Lighting & Shaders...</span>
-            <span id="vi-load-pct">0%</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#C8CDD6;gap:12px;">
+            <span id="vi-load-lbl">Initializing WebGPU &amp; Streaming Engine...</span>
+            <span id="vi-load-pct" style="font-variant-numeric:tabular-nums;font-weight:800;">2%</span>
           </div>
+          <div id="vi-load-dl" style="font-size:11px;color:#8E9BB5;margin-top:6px;min-height:16px;"></div>
+          <div id="vi-load-err" style="display:none;margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,46,99,0.18);border:1px solid rgba(255,46,99,0.65);font-size:12px;color:#FFD6E0;"></div>
         </div>
       </div>
 
@@ -854,14 +1088,21 @@
         <!-- Slide-In Notifications -->
         <div id="vi-toast-stack"></div>
 
-        <!-- Centerpiece GTA 6 Minimap -->
+        <!-- Authentic 2026 GTA VI iFruit 3D/2D Minimap -->
         <div id="vi-minimap-wrap">
-          <div id="vi-minimap-shell">
-            <canvas id="vi-minimap-canvas" width="344" height="214"></canvas>
-            <div id="vi-minimap-north">N</div>
-            <div id="vi-minimap-mode">3D</div>
-            <div id="vi-minimap-gps">1.34 mi</div>
+          <div id="vi-minimap-shell" class="mode-3d">
+            <div id="vi-minimap-stage">
+              <canvas id="vi-minimap-canvas" width="440" height="340"></canvas>
+            </div>
+            <div id="vi-minimap-horizon"></div>
+            <div id="vi-minimap-wanted-wash"></div>
+            <div id="vi-minimap-gps">0.43 mi</div>
+            <div id="vi-minimap-player">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="#FFFFFF"><path d="M6 1L10.5 10.5L6 8.3L1.5 10.5Z"/></svg>
+            </div>
           </div>
+          <div id="vi-minimap-north">N</div>
+          <div id="vi-minimap-wp-pin"></div>
         </div>
 
         <!-- Optional Live Hair/Cloth Physics Companion Rig -->
@@ -870,12 +1111,15 @@
           <div id="vi-phys-lbl">LUCIA · SPRING</div>
         </div>
 
-        <!-- Bottom-Right Contextual Hints -->
+        <!-- Subtle pointer-lock & audio activation helper -->
+        <div id="vi-lock-hint">Click game viewport to lock camera &amp; enable audio</div>
+
+        <!-- Bottom-Right Contextual Hints (PS5 DualSense + PC) -->
         <div id="vi-hints">
-          <div class="vi-hint-pill"><span>LOADOUT</span><span class="vi-keycap">TAB</span></div>
-          <div class="vi-hint-pill"><span>PAUSE / MAP</span><span class="vi-keycap">P</span></div>
+          <div class="vi-hint-pill"><span>LOADOUT</span><span class="vi-ps-cap">L1</span><span class="vi-keycap">TAB</span></div>
+          <div class="vi-hint-pill"><span>PAUSE / MAP</span><span class="vi-ps-cap">OPT</span><span class="vi-keycap">P</span></div>
           <div class="vi-hint-pill"><span>PHONE</span><span class="vi-keycap">↑</span></div>
-          <div class="vi-hint-pill"><span>FOCUS</span><span class="vi-keycap">C</span></div>
+          <div class="vi-hint-pill"><span>FOCUS</span><span class="vi-keycap">CAPS</span></div>
           <div class="vi-hint-pill"><span>SWITCH CHAR</span><span class="vi-keycap">F4</span></div>
         </div>
       </div>
@@ -1101,7 +1345,9 @@
   // ==================== PHASE 3: MAIN MENU ====================
   function showMainMenu() {
     state.phase = 'menu';
+    document.body.classList.remove('vbx-gta6-playing');
     const menu = document.getElementById('vi-menu');
+    menu.style.display = 'block';
     menu.classList.add('visible');
     menu.classList.remove('fadeout');
     renderSettingsPanel(document.getElementById('vi-menu-settings'), false);
@@ -1178,10 +1424,11 @@
 
   function startSandboxLaunch() {
     state.phase = 'loading';
+    document.body.classList.remove('vbx-gta6-playing');
     const menu = document.getElementById('vi-menu');
     const loadEl = document.getElementById('vi-loading');
     menu.classList.add('fadeout');
-    setTimeout(() => { menu.classList.remove('visible'); }, 450);
+    setTimeout(() => { menu.classList.remove('visible'); menu.style.display = 'none'; }, 450);
 
     // If user switched map selection vs initial URL query, reload cleanly into the chosen sandbox map (skipping intro!)
     const curIsEnv = qs.get('map') === 'env_test';
@@ -1194,50 +1441,99 @@
       return;
     }
 
-    if (state.worldReady) {
+    const pgLoading = document.getElementById('loading');
+    if (state.worldReady || (pgLoading && pgLoading.classList.contains('done'))) {
+      state.worldReady = true;
       enterPlayingPhase();
       return;
     }
 
+    loadEl.style.display = 'flex';
     loadEl.classList.add('visible');
     triggerPlayGta5SandboxMode();
 
-    // Update loading bar until playgta5's WebGPU world broadcasts { world: true } (or user clicks Skip once frames appear)
+    // Monitor REAL PlayGTA5 loading progress (BroadcastChannel + DOM fallback) — NEVER exit early on a fake timer!
     const tick = setInterval(() => {
       if (state.phase !== 'loading') { clearInterval(tick); return; }
+
+      const pgLoad = document.getElementById('loading');
+      const pgLbl = document.getElementById('lbl');
+      const pgPct = document.getElementById('pct');
+      const pgDl  = document.getElementById('dl');
+      const pgErr = document.getElementById('err');
+
+      if (pgPct && pgPct.textContent) {
+        const parsed = parseInt(pgPct.textContent, 10);
+        if (!isNaN(parsed) && parsed > state.loadPct) state.loadPct = parsed;
+      }
+      if (pgLbl && pgLbl.textContent && pgLbl.textContent.trim()) {
+        state.loadLabel = pgLbl.textContent.trim();
+      }
+      if (pgDl && pgDl.textContent && pgDl.textContent.trim()) {
+        state.loadDl = pgDl.textContent.trim();
+      }
+      if (pgErr && pgErr.textContent && pgErr.textContent.trim() && !state.loadError) {
+        state.loadError = pgErr.textContent.trim();
+      }
+      if (state.choiceReady) {
+        triggerPlayGta5SandboxMode();
+      }
+
       const fill = document.getElementById('vi-load-fill');
-      const lbl = document.getElementById('vi-load-lbl');
-      const pct = document.getElementById('vi-load-pct');
-      const p = Math.min(99, Math.max(8, Math.round(state.loadPct)));
+      const lbl  = document.getElementById('vi-load-lbl');
+      const pct  = document.getElementById('vi-load-pct');
+      const dlEl = document.getElementById('vi-load-dl');
+      const errBox = document.getElementById('vi-load-err');
+
+      const p = Math.min(99, Math.max(2, Math.round(state.loadPct)));
       if (fill) fill.style.width = p + '%';
-      if (lbl) lbl.textContent = state.loadLabel || 'Streaming Leonida Sandbox Shaders...';
+      if (lbl) lbl.textContent = state.loadLabel || 'Streaming Leonida Sandbox World...';
       if (pct) pct.textContent = p + '%';
-      if (state.worldReady) {
+      if (dlEl) dlEl.textContent = state.loadDl || (state.realFramesSeen > 0 ? `WebGPU compiling world (${state.realFramesSeen} frames)...` : 'Downloading & compiling RAGE WebAssembly...');
+
+      if (state.loadError && errBox) {
+        errBox.style.display = 'block';
+        const from = qs.get('vbx_from') || qs.get('vbx_console') || 'ps5';
+        const backUrl = (from === 'xbox') ? '/xbox/' : (from === 'viceos' ? '/viceos/' : '/ps5/');
+        errBox.innerHTML = `<div style="font-weight:800;margin-bottom:8px;">ENGINE NOTICE: ${state.loadError}</div>` +
+          `<div style="display:flex;gap:8px;">` +
+          `<button onclick="location.reload()" style="padding:7px 14px;border-radius:7px;border:none;background:#F04A98;color:#fff;font-weight:800;cursor:pointer;">RETRY LOAD</button>` +
+          `<button onclick="location.href='${backUrl}'" style="padding:7px 14px;border-radius:7px;border:1px solid rgba(255,255,255,0.28);background:rgba(255,255,255,0.08);color:#fff;font-weight:800;cursor:pointer;">RETURN TO ${from.toUpperCase()}</button>` +
+          `</div>`;
+      }
+
+      // Enter gameplay ONLY once PlayGTA5 genuinely finishes loading the 3D world!
+      const domDone = !!(pgLoad && pgLoad.classList.contains('done'));
+      const framesLive = (state.realFramesSeen >= 24 && state.loadPct >= 76 && !state.loadError);
+      if (state.worldReady || domDone || framesLive) {
+        state.worldReady = true;
         clearInterval(tick);
         enterPlayingPhase();
       }
     }, 180);
+  }
 
-    // Safety fallback: if world broadcast already fired before listener bound, detect live canvas after 5s
-    setTimeout(() => {
-      if (state.phase === 'loading') {
-        const cv = document.getElementById('canvas');
-        if (cv && cv.width >= 320 && state.fps > 5) {
-          state.worldReady = true;
-          enterPlayingPhase();
-        }
-      }
-    }, 6500);
+  function updatePointerLockHint() {
+    const h = document.getElementById('vi-lock-hint');
+    if (!h) return;
+    const shouldShow = (state.phase === 'playing') && !state.pauseOpen && !state.wheelOpen && !state.phoneOpen && !document.pointerLockElement;
+    h.classList.toggle('show', shouldShow);
   }
 
   function enterPlayingPhase() {
     state.phase = 'playing';
+    document.body.classList.add('vbx-gta6-playing');
+    const intro = document.getElementById('vi-intro');
+    const menu  = document.getElementById('vi-menu');
     const loadEl = document.getElementById('vi-loading');
-    loadEl.classList.remove('visible');
+    if (intro) { intro.classList.add('hidden'); intro.style.display = 'none'; }
+    if (menu)  { menu.classList.remove('visible'); menu.style.display = 'none'; }
+    if (loadEl) { loadEl.classList.remove('visible'); loadEl.style.display = 'none'; }
     document.getElementById('vi-hud').classList.add('visible');
     updateHudVisibilitySettings();
+    updatePointerLockHint();
     syncFxToWgpu();
-    pushToast('LEONIDA SANDBOX ACTIVE', `${CHARACTERS[cfg.character].name} · Hold TAB for Loadout, P for Pause/Map, ↑ for Phone, C for Focus, F4 to Swap.`);
+    pushToast('LEONIDA SANDBOX ACTIVE', `${CHARACTERS[cfg.character].name} · Hold TAB (L1) for Loadout, P (OPT) for Pause/Map, ↑ for Phone, CAPS for Focus, M for 3D/2D Radar, F9 for PS5.`);
   }
 
   // ==================== SHARED SETTINGS PANEL (MAIN MENU & PAUSE) ====================
@@ -1283,8 +1579,13 @@
       </div>
 
       <div class="vi-row">
-        <div><div>3D Perspective Minimap</div><div style="font-size:11px;color:#9BA6BE;">Switch between 3D tilted and 2D flat radar</div></div>
+        <div><div>3D Perspective Minimap</div><div style="font-size:11px;color:#9BA6BE;">Switch between 3D iFruit GPS and 2D Classic radar (M)</div></div>
         <button class="vi-toggle ${cfg.minimap3D ? 'on' : ''}" data-set="minimap3D"></button>
+      </div>
+
+      <div class="vi-row">
+        <div><div>Minimap Theme</div><div style="font-size:11px;color:#9BA6BE;">Daylight Light Plate or Nighttime Dark Plate</div></div>
+        <button id="vi-cycle-mtheme" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(255,255,255,0.22);background:rgba(255,255,255,0.10);color:#fff;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:pointer;text-transform:uppercase;">${cfg.minimapTheme || 'auto'}</button>
       </div>
 
       <div class="vi-row">
@@ -1310,6 +1611,18 @@
 
     const closeBtn = container.querySelector('#vi-close-mset');
     if (closeBtn) closeBtn.addEventListener('click', () => container.classList.remove('open'));
+    const mThemeBtn = container.querySelector('#vi-cycle-mtheme');
+    if (mThemeBtn) {
+      mThemeBtn.addEventListener('click', () => {
+        const order = ['auto', 'light', 'dark'];
+        const cur = order.indexOf(cfg.minimapTheme || 'auto');
+        cfg.minimapTheme = order[(cur + 1) % order.length];
+        mThemeBtn.textContent = cfg.minimapTheme;
+        playUiTone(520, 0.06, 0.05);
+        saveCfg();
+        updateHudVisibilitySettings();
+      });
+    }
     const replayBtn = container.querySelector('#vi-replay-intro');
     if (replayBtn) {
       replayBtn.addEventListener('click', () => {
@@ -1343,10 +1656,13 @@
   function updateHudVisibilitySettings() {
     const fpsPill = document.getElementById('vi-fps-pill');
     const physRig = document.getElementById('vi-phys-rig');
-    const mapMode = document.getElementById('vi-minimap-mode');
+    const shell = document.getElementById('vi-minimap-shell');
     if (fpsPill) fpsPill.classList.toggle('visible', !!cfg.showFpsCounter);
     if (physRig) physRig.classList.toggle('visible', !!cfg.showCompanionRig && cfg.hairClothPhysics);
-    if (mapMode) mapMode.textContent = cfg.minimap3D ? '3D' : '2D';
+    if (shell) {
+      shell.classList.toggle('mode-3d', !!cfg.minimap3D);
+      shell.classList.toggle('theme-light', getActiveMapTheme() === 'light');
+    }
   }
 
   // ==================== PHASE 4: WEAPON WHEEL (8 RECTANGULAR CARDS) ====================
@@ -1654,17 +1970,26 @@
     ctx.fillText('VICE-DALE COUNTY', cv.width * 0.62, cv.height * 0.24);
     ctx.fillText('MARIANA COUNTY', cv.width * 0.22, cv.height * 0.78);
 
-    // Pink GPS route from player to waypoint
+    // Smooth curved pink GPS route from player to waypoint
     if (state.waypoint) {
-      ctx.strokeStyle = '#F04A98';
-      ctx.lineWidth = 4;
+      const pts = buildGpsRoutePoints(state.posX, state.posY, state.waypoint.x, state.waypoint.y);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(255, 74, 164, 0.35)';
+      ctx.lineWidth = 9;
       ctx.beginPath();
-      ctx.moveTo(state.posX * sx, state.posY * sy);
-      ctx.lineTo(state.waypoint.x * sx, state.posY * sy);
-      ctx.lineTo(state.waypoint.x * sx, state.waypoint.y * sy);
+      pts.forEach(([px, py], i) => { if (i === 0) ctx.moveTo(px * sx, py * sy); else ctx.lineTo(px * sx, py * sy); });
       ctx.stroke();
 
-      ctx.fillStyle = '#F04A98';
+      ctx.strokeStyle = '#FF4EA6';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      pts.forEach(([px, py], i) => { if (i === 0) ctx.moveTo(px * sx, py * sy); else ctx.lineTo(px * sx, py * sy); });
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.fillStyle = '#FF4EA6';
       ctx.beginPath();
       ctx.arc(state.waypoint.x * sx, state.waypoint.y * sy, 8, 0, Math.PI * 2);
       ctx.fill();
@@ -1853,113 +2178,218 @@
     setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 320); }, 4200);
   }
 
-  // ==================== MINIMAP RENDERER (<0.22ms / FRAME) ====================
+  // ==================== AUTHENTIC 2026 GTA VI iFRUIT 3D/2D MINIMAP RENDERER ====================
+  // Helper: clamp a unit direction (dx, dy) cleanly onto the outer perimeter of a rounded rectangle!
+  function clampToRoundedEdge(sw, sh, dx, dy, inset) {
+    const hw = sw * 0.5 - inset;
+    const hh = sh * 0.5 - inset;
+    const ax = Math.max(0.0001, Math.abs(dx));
+    const ay = Math.max(0.0001, Math.abs(dy));
+    const t = Math.min(hw / ax, hh / ay);
+    let ex = dx * t;
+    let ey = dy * t;
+    // Softly follow the 14px rounded corners so pins glide smoothly around corners
+    const r = 13;
+    const cx = hw - r, cy = hh - r;
+    if (Math.abs(ex) > cx && Math.abs(ey) > cy) {
+      const sx = Math.sign(ex), sy = Math.sign(ey);
+      const vx = Math.abs(ex) - cx, vy = Math.abs(ey) - cy;
+      const vl = Math.hypot(vx, vy) || 1;
+      ex = sx * (cx + (vx / vl) * r);
+      ey = sy * (cy + (vy / vl) * r);
+    }
+    return [sw * 0.5 + ex, sh * 0.5 + ey];
+  }
+
   function drawMinimap(timeSec) {
     const cv = document.getElementById('vi-minimap-canvas');
-    if (!cv) return;
+    const shell = document.getElementById('vi-minimap-shell');
+    if (!cv || !shell) return;
     const ctx = cv.getContext('2d');
     const w = cv.width, h = cv.height;
-    const baked = ensureBakedMap();
+    const theme = getActiveMapTheme();
+    const isDark = theme === 'dark';
+    const baked = ensureBakedMap(theme);
+
+    shell.classList.toggle('mode-3d', !!cfg.minimap3D);
+    shell.classList.toggle('theme-light', !isDark);
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#3B84A8';
+    ctx.fillStyle = isDark ? '#101929' : '#507E90';
     ctx.fillRect(0, 0, w, h);
 
-    // Smooth perspective zoom & tilt when 3D mode is active
-    const targetZoom = state.minimapExpanded ? 0.78 : (1.18 - state.speed * 0.38);
-    state.smoothZoom += (targetZoom - state.smoothZoom) * 0.12;
-    const cx = w * 0.5, cy = cfg.minimap3D ? h * 0.62 : h * 0.54;
+    // Dynamic speed-responsive driving zoom (pulls out cleanly when accelerating/driving like real GTA VI)
+    const targetZoom = state.minimapExpanded ? 0.72 : (cfg.minimap3D ? (1.12 - state.speed * 0.34) : (0.94 - state.speed * 0.28));
+    state.smoothZoom += (targetZoom - state.smoothZoom) * 0.10;
+    const pivotX = w * 0.5;
+    const pivotY = cfg.minimap3D ? h * 0.67 : h * 0.54;
 
     ctx.save();
-    if (cfg.minimap3D) {
-      // Lightweight 2.5D perspective shear/compress (zero WebGL overhead, silky 60fps on GTX 1050)
-      ctx.translate(cx, cy);
-      ctx.scale(1.06, 0.78);
-      ctx.translate(-cx, -cy);
-    }
-
-    ctx.translate(cx, cy);
+    ctx.translate(pivotX, pivotY);
     ctx.rotate(-state.smoothHeading);
     ctx.scale(state.smoothZoom, state.smoothZoom);
     ctx.translate(-state.posX, -state.posY);
 
-    // 1 single GPU-accelerated blit of the entire pre-baked Vice City vector tile!
+    // 1. Single GPU-accelerated blit of the crisp 1536x1536 dual-theme Vice-Dale / Vice Beach map
     ctx.drawImage(baked, 0, 0);
 
-    // Animated Hot-Pink GTA 6 GPS Waypoint Route (#F04A98)
+    // 2. Luminous Hot-Pink GTA VI Curved GPS Route Ribbon (#FF4AA4 core + soft neon glow)
     if (state.waypoint) {
-      ctx.strokeStyle = 'rgba(240, 74, 152, 0.35)';
-      ctx.lineWidth = 9;
+      const pts = buildGpsRoutePoints(state.posX, state.posY, state.waypoint.x, state.waypoint.y);
+      ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+
+      // Soft magenta outer glow
+      ctx.strokeStyle = 'rgba(255, 62, 158, 0.36)';
+      ctx.lineWidth = 14;
       ctx.beginPath();
-      ctx.moveTo(state.posX, state.posY);
-      ctx.lineTo(state.waypoint.x, state.posY);
-      ctx.lineTo(state.waypoint.x, state.waypoint.y);
+      pts.forEach(([px, py], i) => { if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
       ctx.stroke();
 
-      ctx.strokeStyle = '#F04A98';
-      ctx.lineWidth = 4.5;
+      // Core hot-pink route ribbon
+      ctx.strokeStyle = '#FF4EA6';
+      ctx.lineWidth = 6.5;
       ctx.beginPath();
-      ctx.moveTo(state.posX, state.posY);
-      ctx.lineTo(state.waypoint.x, state.posY);
-      ctx.lineTo(state.waypoint.x, state.waypoint.y);
+      pts.forEach(([px, py], i) => { if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
       ctx.stroke();
+
+      // Subtle luminous bright-pink highlight core
+      ctx.strokeStyle = 'rgba(255, 206, 232, 0.72)';
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      pts.forEach(([px, py], i) => { if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+      ctx.stroke();
+
+      // Waypoint destination marker inside map space
+      ctx.fillStyle = '#FF4EA6';
+      ctx.beginPath();
+      ctx.arc(state.waypoint.x, state.waypoint.y, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
     }
 
-    // Crisp custom blips (NO police dots during wanted — authentic GTA 6 mechanic!)
+    // 3. True 3D Extruded Nearby Skyscrapers (when 3D mode is active — rises smoothly toward camera!)
+    if (cfg.minimap3D) {
+      const cosH = Math.cos(state.smoothHeading);
+      const sinH = Math.sin(state.smoothHeading);
+      // Up-screen vector in map world space (buildings extrude upward in screen space!)
+      const upX = sinH;
+      const upY = -cosH;
+      const wallCol = isDark ? 'rgba(24, 32, 48, 0.92)' : 'rgba(104, 111, 118, 0.88)';
+      const roofCol = isDark ? 'rgba(56, 68, 92, 0.96)' : 'rgba(178, 184, 190, 0.95)';
+      const rimCol  = isDark ? 'rgba(124, 142, 174, 0.35)' : 'rgba(255, 255, 255, 0.38)';
+
+      const viewR = 290 / Math.max(0.5, state.smoothZoom);
+      for (let i = 0; i < MAP_BUILDINGS.length; i++) {
+        const b = MAP_BUILDINGS[i];
+        const bx = b.x + b.w * 0.5 - state.posX;
+        const by = b.y + b.h * 0.5 - state.posY;
+        if (Math.abs(bx) > viewR || Math.abs(by) > viewR) continue;
+        const ext = b.elev * 0.34;
+        const rx = b.x + upX * ext;
+        const ry = b.y + upY * ext;
+
+        // Extruded vertical wall envelope
+        ctx.fillStyle = wallCol;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x + b.w, b.y);
+        ctx.lineTo(b.x + b.w, b.y + b.h);
+        ctx.lineTo(b.x, b.y + b.h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y + b.h);
+        ctx.lineTo(b.x + b.w, b.y + b.h);
+        ctx.lineTo(rx + b.w, ry + b.h);
+        ctx.lineTo(rx, ry + b.h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(b.x + b.w, b.y);
+        ctx.lineTo(b.x + b.w, b.y + b.h);
+        ctx.lineTo(rx + b.w, ry + b.h);
+        ctx.lineTo(rx + b.w, ry);
+        ctx.closePath();
+        ctx.fill();
+
+        // Elevated rooftop slab with crisp highlight edge
+        ctx.fillStyle = roofCol;
+        ctx.fillRect(rx, ry, b.w, b.h);
+        ctx.strokeStyle = rimCol;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rx + 0.5, ry + 0.5, b.w - 1, b.h - 1);
+      }
+    }
+
+    // 4. Clean POI Blips (NO police dots during wanted — authentic GTA VI pursuit design!)
     for (const b of BLIPS) {
-      ctx.fillStyle = '#14171F';
+      ctx.fillStyle = '#0F1219';
       ctx.beginPath(); ctx.arc(b.x, b.y, 7.5, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = b.color;
-      ctx.beginPath(); ctx.arc(b.x, b.y, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(b.x, b.y, 4.4, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
 
-    // Red-pink manhunt search zone glow when wanted (no cop dots!)
-    if (state.wantedStars > 0) {
-      const pulse = 0.16 + 0.12 * Math.sin(timeSec * 5.2);
-      ctx.fillStyle = `rgba(255, 46, 99, ${pulse.toFixed(3)})`;
-      ctx.fillRect(0, 0, w, h);
+    // 5. Authentic GTA VI Wanted Heat Wash (pulsing red/blue pursuit haze, no cop icons)
+    const washEl = document.getElementById('vi-minimap-wanted-wash');
+    if (washEl) {
+      if (state.wantedStars > 0) {
+        const s = Math.sin(timeSec * 5.6);
+        const colA = s >= 0 ? 'rgba(255, 42, 92, 0.34)' : 'rgba(42, 130, 255, 0.34)';
+        const colB = s >= 0 ? 'rgba(42, 130, 255, 0.14)' : 'rgba(255, 42, 92, 0.14)';
+        washEl.style.opacity = '1';
+        washEl.style.background = `radial-gradient(ellipse at 50% 45%, ${colB} 15%, ${colA} 95%)`;
+      } else {
+        washEl.style.opacity = '0';
+      }
     }
 
-    // Subtle top horizon haze in 3D mode
-    if (cfg.minimap3D) {
-      const hz = ctx.createLinearGradient(0, 0, 0, h * 0.34);
-      hz.addColorStop(0, 'rgba(20, 28, 48, 0.58)');
-      hz.addColorStop(1, 'rgba(20, 28, 48, 0)');
-      ctx.fillStyle = hz;
-      ctx.fillRect(0, 0, w, h * 0.34);
-    }
-
-    // Player white directional chevron inside crisp dark halo
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.fillStyle = '#14171F';
-    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5.5, 5.5); ctx.lineTo(0, 2.5); ctx.lineTo(-5.5, 5.5); ctx.closePath(); ctx.fill();
-    ctx.restore();
-
-    // Orbiting North ('N') badge clamped cleanly onto minimap perimeter!
+    // 6. Orbiting Black Circular 'N' Badge clamped cleanly onto outer rounded-rectangle border
+    const sw = shell.clientWidth || 258;
+    const sh = shell.clientHeight || 154;
     const northEl = document.getElementById('vi-minimap-north');
-    const shell = document.getElementById('vi-minimap-shell');
-    if (northEl && shell) {
-      const sw = shell.clientWidth, sh = shell.clientHeight;
+    if (northEl) {
       const na = -state.smoothHeading - Math.PI / 2;
-      const dx = Math.cos(na), dy = Math.sin(na);
-      const scaleX = (sw * 0.5 - 11) / Math.max(0.001, Math.abs(dx));
-      const scaleY = (sh * 0.5 - 11) / Math.max(0.001, Math.abs(dy));
-      const t = Math.min(scaleX, scaleY);
-      northEl.style.left = (sw * 0.5 + dx * t) + 'px';
-      northEl.style.top = (sh * 0.5 + dy * t) + 'px';
+      const [nx, ny] = clampToRoundedEdge(sw, sh, Math.cos(na), Math.sin(na), 1);
+      northEl.style.left = nx + 'px';
+      northEl.style.top  = ny + 'px';
     }
 
-    // Live GPS distance countdown readout
+    // 7. Orbiting Glowing Hot-Pink Waypoint Pin on perimeter edge (exact match to real GTA VI bo-2.png!)
+    const wpPin = document.getElementById('vi-minimap-wp-pin');
     const gpsEl = document.getElementById('vi-minimap-gps');
-    if (gpsEl && state.waypoint) {
-      const distMi = (Math.hypot(state.waypoint.x - state.posX, state.waypoint.y - state.posY) / 195).toFixed(2);
-      gpsEl.textContent = distMi + ' mi';
+    if (state.waypoint) {
+      const wx = state.waypoint.x - state.posX;
+      const wy = state.waypoint.y - state.posY;
+      const distPx = Math.hypot(wx, wy);
+      if (gpsEl) {
+        gpsEl.style.display = 'block';
+        gpsEl.textContent = (distPx / 280).toFixed(2) + ' mi';
+      }
+      if (wpPin) {
+        if (distPx > 95) {
+          // Rotate world offset into minimap screen space
+          const ch = Math.cos(-state.smoothHeading), shh = Math.sin(-state.smoothHeading);
+          const rx = wx * ch - wy * shh;
+          const ry = wx * shh + wy * ch;
+          const [px, py] = clampToRoundedEdge(sw, sh, rx, ry, 1);
+          wpPin.style.display = 'block';
+          wpPin.style.left = px + 'px';
+          wpPin.style.top  = py + 'px';
+        } else {
+          wpPin.style.display = 'none';
+        }
+      }
+    } else {
+      if (gpsEl) gpsEl.style.display = 'none';
+      if (wpPin) wpPin.style.display = 'none';
     }
   }
 
@@ -1972,6 +2402,8 @@
         renderPauseTab();
       });
     });
+
+    document.addEventListener('pointerlockchange', updatePointerLockHint);
 
     // Real mouse motion feeds both minimap heading & WebGPU camera motion blur velocity!
     window.addEventListener('mousemove', (e) => {
@@ -1986,11 +2418,15 @@
       }
     }, true);
 
+    // Clean, non-destructive key bindings (NEVER hijack GTA V core controls like Q=Cover, C=Look Behind, K=Aircraft Pitch!)
     window.addEventListener('keydown', (e) => {
       state.keys[e.code] = true;
       if (state.phase !== 'playing') return;
 
-      if (e.code === 'Tab' || e.code === 'KeyQ') {
+      // Ignore hotkeys while typing inside Cheat Menu input box
+      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+      if (e.code === 'Tab') {
         if (!state.pauseOpen) {
           e.preventDefault();
           if (!state.wheelOpen) setWheelOpen(true);
@@ -2003,19 +2439,21 @@
       } else if (e.code === 'KeyP') {
         e.preventDefault();
         setPauseOpen(!state.pauseOpen);
-      } else if (e.code === 'ArrowUp' || e.code === 'KeyK') {
+        updatePointerLockHint();
+      } else if (e.code === 'ArrowUp') {
         if (!state.pauseOpen && !state.wheelOpen) {
           e.preventDefault();
           setPhoneOpen(!state.phoneOpen);
+          updatePointerLockHint();
         }
-      } else if (e.code === 'KeyC' && !state.pauseOpen && !state.wheelOpen) {
+      } else if (e.code === 'CapsLock' && !state.pauseOpen && !state.wheelOpen) {
         state.focusActive = !state.focusActive;
         playUiTone(state.focusActive ? 260 : 420, 0.12, 0.06, 'sine');
-      } else if (e.code === 'KeyN' && !state.pauseOpen) {
+      } else if (e.code === 'KeyM' && !state.pauseOpen && !state.wheelOpen) {
         cfg.minimap3D = !cfg.minimap3D;
         saveCfg();
         updateHudVisibilitySettings();
-        pushToast('RADAR MODE', cfg.minimap3D ? '3D Perspective Minimap' : '2D Top-Down Minimap');
+        pushToast('RADAR VIEW', cfg.minimap3D ? '3D iFruit Perspective Minimap' : '2D Classic Top-Down Minimap');
       } else if (e.code === 'KeyZ' && !state.pauseOpen) {
         state.minimapExpanded = !state.minimapExpanded;
         document.getElementById('vi-minimap-shell').classList.toggle('expanded', state.minimapExpanded);
@@ -2027,17 +2465,18 @@
         saveCfg();
         updateHudVisibilitySettings();
       } else if (e.code === 'Escape') {
-        if (state.pauseOpen) setPauseOpen(false);
-        else if (state.phoneOpen) setPhoneOpen(false);
-        else if (state.wheelOpen) setWheelOpen(false);
+        if (state.pauseOpen) { e.preventDefault(); setPauseOpen(false); updatePointerLockHint(); }
+        else if (state.phoneOpen) { e.preventDefault(); setPhoneOpen(false); updatePointerLockHint(); }
+        else if (state.wheelOpen) { e.preventDefault(); setWheelOpen(false); updatePointerLockHint(); }
       }
     }, true);
 
     window.addEventListener('keyup', (e) => {
       state.keys[e.code] = false;
-      if (state.phase === 'playing' && (e.code === 'Tab' || e.code === 'KeyQ') && state.wheelOpen) {
+      if (state.phase === 'playing' && e.code === 'Tab' && state.wheelOpen) {
         selectWheelSlot(state.hoveredSlot);
         setWheelOpen(false);
+        updatePointerLockHint();
       }
     }, true);
 
@@ -2056,26 +2495,52 @@
 
       if (state.phase === 'playing') {
         state.gameMinutes += dt * 0.4;
-        // Player forward/strafe kinematics for minimap tracking + radial speed blur
-        const fwd = (state.keys['KeyW'] ? 1 : 0) - (state.keys['KeyS'] ? 1 : 0);
-        const turn = (state.keys['KeyD'] ? 1 : 0) - (state.keys['KeyA'] ? 1 : 0);
-        const sprint = !!state.keys['ShiftLeft'] || !!state.keys['ShiftRight'];
 
-        const targetSpeed = fwd > 0 ? (sprint ? 1.0 : 0.45) : (fwd < 0 ? 0.25 : 0);
+        // Read BOTH keyboard AND PS5 DualSense / Xbox controller sticks + triggers for live minimap & motion blur!
+        let padFwd = 0, padTurn = 0, padSprint = false;
+        try {
+          const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for (let i = 0; i < pads.length; i++) {
+            const gp = pads[i];
+            if (!gp || !gp.connected) continue;
+            const lx = gp.axes[0] || 0;
+            const ly = gp.axes[1] || 0;
+            const rx = gp.axes[2] || 0;
+            const r2 = gp.buttons[7] ? gp.buttons[7].value : 0;
+            const l2 = gp.buttons[6] ? gp.buttons[6].value : 0;
+            if (Math.abs(lx) > 0.2) padTurn = lx;
+            if (ly < -0.2 || r2 > 0.15) padFwd = Math.max(-ly, r2);
+            else if (ly > 0.2 || l2 > 0.15) padFwd = -Math.max(ly, l2);
+            if (gp.buttons[0] && gp.buttons[0].pressed) padSprint = true;
+            if (Math.abs(rx) > 0.18) {
+              state.heading += rx * dt * 2.1 * ((cfg.lookSensitivity || 100) / 100);
+              state.camVelX = Math.max(-22, Math.min(22, state.camVelX + rx * 2.8));
+            }
+            break;
+          }
+        } catch (e) {}
+
+        const kbFwd = (state.keys['KeyW'] ? 1 : 0) - (state.keys['KeyS'] ? 1 : 0);
+        const kbTurn = (state.keys['KeyD'] ? 1 : 0) - (state.keys['KeyA'] ? 1 : 0);
+        const fwd = Math.abs(padFwd) > 0.15 ? padFwd : kbFwd;
+        const turn = Math.abs(padTurn) > 0.15 ? padTurn : kbTurn;
+        const sprint = !!state.keys['ShiftLeft'] || !!state.keys['ShiftRight'] || padSprint;
+
+        const targetSpeed = fwd > 0.1 ? (sprint ? 1.0 : Math.min(0.85, 0.45 + fwd * 0.4)) : (fwd < -0.1 ? 0.28 : 0);
         state.speed += (targetSpeed - state.speed) * Math.min(1, dt * 4.5);
-        if (turn !== 0 && state.speed > 0.15) {
+        if (Math.abs(turn) > 0.1 && state.speed > 0.12) {
           state.heading += turn * dt * 1.45;
           state.camVelX = Math.max(-18, Math.min(18, state.camVelX + turn * 2.2));
         }
         state.smoothHeading += (state.heading - state.smoothHeading) * Math.min(1, dt * 10);
 
         // Advance minimap position cleanly within Vice-Dale County bounds
-        const movePx = state.speed * dt * 36 * (fwd < 0 ? -0.5 : 1);
-        state.posX = Math.max(60, Math.min(MAP_SIZE - 60, state.posX + Math.sin(state.smoothHeading) * movePx));
-        state.posY = Math.max(60, Math.min(MAP_SIZE - 60, state.posY - Math.cos(state.smoothHeading) * movePx));
+        const movePx = state.speed * dt * 52 * (fwd < -0.1 ? -0.5 : 1);
+        state.posX = Math.max(80, Math.min(MAP_SIZE - 80, state.posX + Math.sin(state.smoothHeading) * movePx));
+        state.posY = Math.max(80, Math.min(MAP_SIZE - 80, state.posY - Math.cos(state.smoothHeading) * movePx));
 
         // Vitals simulation (Stamina sprint drain + Focus Eagle Eye drain)
-        if (sprint && fwd > 0) state.stamina = Math.max(0, state.stamina - dt * 14);
+        if (sprint && fwd > 0.1) state.stamina = Math.max(0, state.stamina - dt * 14);
         else state.stamina = Math.min(100, state.stamina + dt * 10);
 
         if (state.focusActive && state.focus > 0) {
@@ -2095,11 +2560,13 @@
           const fp = document.getElementById('vi-fps-pill');
           if (fp) {
             const tierTag = cfg.perfAuto ? ` · AUTO T${state.perfTier}` : '';
-            fp.textContent = `${state.fps.toFixed(1)} FPS · ${state.frameMs.toFixed(2)} ms · ${state.resW}×${state.resH}${tierTag}`;
+            const fpsDisp = state.fps > 0 ? state.fps.toFixed(1) : '--';
+            const msDisp  = state.frameMs > 0 ? state.frameMs.toFixed(2) : '--';
+            fp.textContent = `${fpsDisp} FPS · ${msDisp} ms · ${state.resW}×${state.resH}${tierTag}`;
           }
         }
 
-        // Update Hair & Cloth spring physics + draw minimap
+        // Update Hair & Cloth spring physics + draw authentic 2026 iFruit minimap
         updateHairClothPhysics(dt, timeSec);
         drawMinimap(timeSec);
 

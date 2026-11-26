@@ -565,8 +565,8 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.7"
-                                         : "PS5 · XBOX · VICEOS  //  v2.7");
+                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.8"
+                                         : "PS5 · XBOX · VICEOS  //  v2.8");
     ImGui::PopFont();
 
     // Center Controls: LIVE EMBEDDED VIEWPORT TOOLBAR when game/console is active inside window,
@@ -648,8 +648,10 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
                     app.PushLog("[VIEWPORT] Direct GTA V WebGPU launch inside embedded viewport -> " + u);
                 } else if (b.action == 7) {
                     app.SyncToShared(shared, sharedMu, "gta6");
-                    std::string u = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) + "&vbx_from=" +
-                        (app.config.consoleTarget == 2 ? "viceos" : (app.config.consoleTarget == 1 ? "xbox" : "ps5"));
+                    std::string tag = (app.config.consoleTarget == 2) ? "viceos"
+                                    : ((app.config.consoleTarget == 1) ? "xbox" : "ps5");
+                    std::string u = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) +
+                        "&vbx_console=" + tag + "&vbx_from=" + tag;
                     RECT rc{}; GetClientRect(g_hWnd, &rc);
                     viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
                     app.PushLog("[VIEWPORT] Experimental GTA 6 Sandbox launch inside embedded viewport -> " + u);
@@ -1071,7 +1073,8 @@ static void TriggerConsoleLaunch(AppState& app, LocalHttpServer& server,
         app.SyncToShared(shared, sharedMu, "gta6");
         std::string fromTag = (app.config.consoleTarget == 2) ? "viceos"
                             : ((app.config.consoleTarget == 1) ? "xbox" : "ps5");
-        app.launchTargetUrl = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) + "&vbx_from=" + fromTag;
+        app.launchTargetUrl = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) +
+                              "&vbx_console=" + fromTag + "&vbx_from=" + fromTag;
         app.launchBannerTitle = "BOOTING EXPERIMENTAL GTA VI SANDBOX";
         app.launchSubtitle = "Leonida WebGPU Pipeline · Vice City Lighting & Motion Blur · Performance: Auto";
         app.launchAccent = Palette::VicePink;
@@ -1402,7 +1405,8 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         ImVec2 btnC6{};
         ImGui::PushFont(fonts.bold);
         const char* cta6 = expGta6Active
-            ? "LAUNCH EXPERIMENTAL GTA 6  (SANDBOX)"
+            ? (ct == 2 ? "BOOT VICEOS NEO  (GTA VI)"
+                       : (ct == 1 ? "BOOT XBOX UI  (GTA VI)" : "BOOT PS5 UI  (GTA VI)"))
             : (devGta6Ready
                 ? (ct == 2 ? "BOOT VICEOS NEO  (GTA VI DEV)"
                            : (ct == 1 ? "BOOT XBOX UI  (GTA VI DEV)" : "BOOT PS5 UI  (GTA VI DEV)"))
@@ -1416,7 +1420,8 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
 
         if (click6) {
             if (expGta6Active) {
-                TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta6", false, true);
+                // Restored PS5/Xbox/ViceOS console boot flow: mounts GTA VI on PS5 Dashboard so Play launches Experimental GTA 6!
+                TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta6", false, false);
             } else if (devGta6Ready) {
                 if (app.config.devGta6ExePath.empty()) {
                     app.activeTab = 3;
