@@ -104,7 +104,7 @@ public:
         }
     }
 
-    bool LaunchExe(const std::string& utf8Path, std::string& outError) {
+    bool LaunchExe(const std::string& utf8Path, std::string& outError, bool forEmbed = false) {
         if (!IsExeFilePath(utf8Path)) {
             outError = "Selected file is not a Windows .exe executable.";
             return false;
@@ -131,15 +131,25 @@ public:
             shortName = utf8Path.substr(slashA + 1);
         }
 
-        // Create a Job Object to automatically track child processes spawned by launchers/bootstrappers
-        // (No JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so closing ViceBox X will not kill the game)
+        // Create a Job Object to automatically track child processes spawned by launchers/bootstrappers.
+        // When launched in fitanyexe embedded mode, set KILL_ON_JOB_CLOSE so closing ViceBox X
+        // never leaves an invisible borderless .exe orphaned on the desktop!
         HANDLE hJob = CreateJobObjectW(nullptr, nullptr);
+        if (hJob && forEmbed) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+            jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        }
 
         HANDLE hProc = nullptr;
         DWORD pid = 0;
 
         STARTUPINFOW si{};
         si.cb = sizeof(si);
+        if (forEmbed) {
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_SHOWNOACTIVATE;
+        }
         PROCESS_INFORMATION pi{};
         std::wstring cmdLine = L"\"" + wPath + L"\"";
         std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
@@ -163,7 +173,7 @@ public:
             sei.lpVerb = L"open";
             sei.lpFile = wPath.c_str();
             sei.lpDirectory = wDir.empty() ? nullptr : wDir.c_str();
-            sei.nShow = SW_SHOWNORMAL;
+            sei.nShow = forEmbed ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL;
             if (!ShellExecuteExW(&sei) || !sei.hProcess) {
                 if (hJob) CloseHandle(hJob);
                 outError = "Windows failed to start the selected .exe executable.";
@@ -185,7 +195,8 @@ public:
             targetFullPath_ = utf8Path;
             launchTickMs_ = GetTickCount64();
             eventLog_.clear();
-            PushEventLocked("[DEVKIT] Attached target " + shortName + " (PID " + std::to_string(pid) + ")");
+            PushEventLocked(std::string(forEmbed ? "[FITEXE]  Embedding target " : "[DEVKIT] Attached target ") +
+                            shortName + " (PID " + std::to_string(pid) + ")");
             PushEventLocked("[RAGE9]  Full-Screen Telemetry Overlay armed (F10 toggle)");
             if (fakeFpsEnabled_.load()) {
                 PushEventLocked("[FPSCAP] Target limiter engaged -> MAX " + std::to_string(fakeFpsLimit_.load()) + " FPS");
@@ -199,6 +210,46 @@ public:
         limiterThread_ = std::thread([this]() { LimiterLoop(); });
         overlayThread_ = std::thread([this]() { OverlayLoop(); });
         return true;
+    }
+
+    std::vector<DWORD> GetTrackedPids() const {
+        return CollectTrackedPids();
+    }
+
+    bool IsTargetAlive() const {
+        return IsAnyTargetAlive();
+    }
+
+    std::string GetExeName() const {
+        std::lock_guard<std::mutex> lk(mu_);
+        return targetExeName_;
+    }
+
+    void TerminateAllTrackedProcesses() {
+        ResumeAllTrackedProcesses();
+        HANDLE jobCopy = nullptr;
+        HANDLE rootCopy = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            jobCopy = hJob_;
+            rootCopy = hTargetProc_;
+        }
+        if (jobCopy) {
+            TerminateJobObject(jobCopy, 0);
+        }
+        auto pids = CollectTrackedPids();
+        DWORD selfPid = GetCurrentProcessId();
+        for (DWORD p : pids) {
+            if (p == 0 || p == selfPid) continue;
+            HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, p);
+            if (h) {
+                TerminateProcess(h, 0);
+                CloseHandle(h);
+            }
+        }
+        if (rootCopy) {
+            TerminateProcess(rootCopy, 0);
+        }
     }
 
     void StopSession() {

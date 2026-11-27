@@ -56,8 +56,7 @@ struct EmulatorConfig {
 
     // Foxxy Developer Mode (only accessible when signed in as "Foxxy")
     bool devGta6Enabled     = false;
-    bool devExpGta6         = false; // Experimental GTA 6 (reskins PlayGTA5 Sandbox -> GTA VI experience)
-    bool devPerfAuto        = true;  // Default ON: quiet GTX 1050 (2-4GB VRAM) 1080p @ 60 FPS optimizer
+    bool devFitAnyExe       = false; // fitanyexe: Play GTA VI intro .mp4 first, then embed selected .exe INSIDE emulator GUI (chrome stripped)
     std::string devGta6ExePath;
     bool devFullOverlay     = true;  // Full-screen Windows Dev Overlay for launched GTA VI .exe
     bool devFakeFpsEnabled  = false; // Cap launched GTA VI .exe max FPS
@@ -89,24 +88,6 @@ inline const char* kViewportNames[] = {
     "System Default Browser"
 };
 inline const char* kConsoleNames[]  = { "PlayStation 5 (Xbox->PS5 Port)", "Xbox Series X / 360 (DashX360)", "ViceOS Neo (Custom Console UI)" };
-
-/**
- * Builds the Experimental GTA 6 Sandbox boot path ("/gta6/boot?mode=sandbox&vbx_gta6=1...")
- * used ONLY when Developer Settings -> "Experimental GTA 6" is enabled.
- * Plays the real GTA 6 Rockstar Games Logo startup video (z_RUhg96MiI) before opening the
- * GTA VI Main Menu & Sandbox, keeping GTX 1050 targeting 60 FPS @ 1080p when devPerfAuto is ON.
- */
-inline std::string BuildExperimentalGta6PlayPath(const EmulatorConfig& cfg) {
-    const int sens = std::max(20, std::min(300, cfg.lookSensitivity));
-    std::string url = "/gta6/boot?mode=sandbox&map=env_test&vbx_gta6=1";
-    url += "&vbx_perf_auto=" + std::string(cfg.devPerfAuto ? "1" : "0");
-    url += "&low=0";
-    url += "&fps=" + std::string(cfg.devPerfAuto ? "60" : "0");
-    url += "&scale=" + std::string(cfg.devPerfAuto ? "0.90" : "1.00");
-    url += "&shadows=1";
-    url += "&vbx_sens=" + std::to_string(sens);
-    return url;
-}
 
 /**
  * Builds the local-proxy GTA V play path ("/play/?...") so the embedded server
@@ -375,8 +356,7 @@ inline void SaveConfig(const EmulatorConfig& cfg) {
     f << "lookSensitivity=" << cfg.lookSensitivity << "\n";
     f << "psPlusTier=" << cfg.psPlusTier << "\n";
     f << "devGta6Enabled=" << (cfg.devGta6Enabled ? 1 : 0) << "\n";
-    f << "devExpGta6=" << (cfg.devExpGta6 ? 1 : 0) << "\n";
-    f << "devPerfAuto=" << (cfg.devPerfAuto ? 1 : 0) << "\n";
+    f << "devFitAnyExe=" << (cfg.devFitAnyExe ? 1 : 0) << "\n";
     f << "devGta6ExePath=" << cfg.devGta6ExePath << "\n";
     f << "devFullOverlay=" << (cfg.devFullOverlay ? 1 : 0) << "\n";
     f << "devFakeFpsEnabled=" << (cfg.devFakeFpsEnabled ? 1 : 0) << "\n";
@@ -415,8 +395,7 @@ inline void LoadConfig(EmulatorConfig& cfg) {
             else if (k == "lookSensitivity") cfg.lookSensitivity = std::max(20, std::min(300, std::stoi(v)));
             else if (k == "psPlusTier") cfg.psPlusTier = v;
             else if (k == "devGta6Enabled") cfg.devGta6Enabled = (std::stoi(v) != 0);
-            else if (k == "devExpGta6") cfg.devExpGta6 = (std::stoi(v) != 0);
-            else if (k == "devPerfAuto") cfg.devPerfAuto = (std::stoi(v) != 0);
+            else if (k == "devFitAnyExe" || k == "fitanyexe") cfg.devFitAnyExe = (std::stoi(v) != 0);
             else if (k == "devGta6ExePath") cfg.devGta6ExePath = v;
             else if (k == "devFullOverlay") cfg.devFullOverlay = (std::stoi(v) != 0);
             else if (k == "devFakeFpsEnabled") cfg.devFakeFpsEnabled = (std::stoi(v) != 0);

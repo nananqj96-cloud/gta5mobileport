@@ -601,6 +601,7 @@
     resIndex: 1,
     isFoxxyDev: false,
     devGta6Enabled: false,
+    devFitAnyExe: false,
     devGta6ExePath: '',
     gta5Url: '/play/?low=0&fps=60&res=1600x900&scale=1.00&shadows=1&fixed=1',
     telemetry: { cpuPct: 0, gpuPct: 0, vramUsedMb: 0, ramUsedGb: 0, ramTotalGb: 16, gpuName: 'Direct3D GPU' },
@@ -741,12 +742,12 @@
   }
 
   async function launchGta6(alsoOpenGta5) {
-    if (st.isFoxxyDev && st.devExpGta6 && st.expGta6Url) {
-      showToast('Launching Grand Theft Auto VI on ViceOS Neo...', '#F04A98');
-      setTimeout(() => { window.location.href = st.expGta6Url + '&vbx_console=viceos&vbx_from=viceos'; }, 340);
+    const hasCustom = st.isFoxxyDev && st.devGta6Enabled && !!st.devGta6ExePath;
+    if (hasCustom && st.devFitAnyExe) {
+      showToast('Starting GTA VI Intro & Embedding .EXE inside ViceBox X...', '#F04A98');
+      setTimeout(() => { window.location.href = '/gta6/boot?mode=fitanyexe&vbx_from=viceos'; }, 280);
       return;
     }
-    const hasCustom = st.isFoxxyDev && st.devGta6Enabled && !!st.devGta6ExePath;
     if (hasCustom) {
       showToast('Launching GTA VI Developer Target...', '#ffb830');
       try {
@@ -1539,10 +1540,9 @@
         if (typeof s.enableCheatMenu === 'boolean') st.enableCheatMenu = s.enableCheatMenu;
         if (typeof s.resIndex === 'number') st.resIndex = s.resIndex;
         if (s.gta5Url) st.gta5Url = s.gta5Url;
-        if (s.expGta6Url) st.expGta6Url = s.expGta6Url;
         st.isFoxxyDev = !!s.isFoxxyDev;
         st.devGta6Enabled = !!s.devGta6Enabled;
-        st.devExpGta6 = !!s.devExpGta6;
+        st.devFitAnyExe = !!(s.devFitAnyExe || s.fitanyexe);
         st.devGta6ExePath = s.devGta6ExePath || '';
       }
     } catch (e) {}

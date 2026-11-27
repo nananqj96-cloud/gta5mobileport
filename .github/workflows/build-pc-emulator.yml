@@ -92,7 +92,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f releases/ViceBox-GTA6-Emulator.exe
           if ! git diff --cached --quiet; then
-            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v2.8 (MSVC x64 + Embedded WebView2 + Native 1080p60 Intro) [skip ci]"
+            git commit -m "Build standalone ViceBox-GTA6-Emulator.exe v3.0 (MSVC x64 + Embedded WebView2 + fitanyexe + Native 1080p60 Intro) [skip ci]"
             git pull --rebase origin "${{ github.ref_name }}"
             git push origin HEAD:"${{ github.ref_name }}"
           fi

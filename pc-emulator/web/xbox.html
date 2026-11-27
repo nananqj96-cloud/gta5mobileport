@@ -705,12 +705,12 @@
 
     if (game.id === 'gta6') {
       xboxSfx('ok');
-      if (state.isFoxxyDev && state.devExpGta6 && state.expGta6Url) {
-        showToast('Launching Grand Theft Auto VI on Xbox...');
-        setTimeout(() => { window.location.href = state.expGta6Url + '&vbx_console=xbox&vbx_from=xbox'; }, 340);
+      const hasCustom = state.isFoxxyDev && state.devGta6Enabled && !!state.devGta6ExePath;
+      if (hasCustom && state.devFitAnyExe) {
+        showToast('Starting GTA VI Intro & Embedding .EXE inside ViceBox X...');
+        setTimeout(() => { window.location.href = '/gta6/boot?mode=fitanyexe&vbx_from=xbox'; }, 280);
         return;
       }
-      const hasCustom = state.isFoxxyDev && state.devGta6Enabled && !!state.devGta6ExePath;
       if (hasCustom) {
         showToast('Launching GTA VI Developer Executable...');
         try {
@@ -1875,10 +1875,9 @@
         if (typeof s.showDebugHud === 'boolean') state.showDebugHud = s.showDebugHud;
         if (typeof s.enableCheatMenu === 'boolean') state.enableCheatMenu = s.enableCheatMenu;
         if (s.gta5Url) state.gta5Url = s.gta5Url;
-        if (s.expGta6Url) state.expGta6Url = s.expGta6Url;
         state.isFoxxyDev = !!s.isFoxxyDev;
         state.devGta6Enabled = !!s.devGta6Enabled;
-        state.devExpGta6 = !!s.devExpGta6;
+        state.devFitAnyExe = !!(s.devFitAnyExe || s.fitanyexe);
         state.devGta6ExePath = s.devGta6ExePath || '';
       }
     } catch (e) {}

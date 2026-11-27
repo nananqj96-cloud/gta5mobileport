@@ -14,11 +14,10 @@
 
   // Read initial runtime flags from URL + sync live state with local C++ server
   const urlParams = new URLSearchParams(window.location.search);
-  const isExpGta6 = urlParams.get('vbx_gta6') === '1';
   const vbxState = {
     consoleTarget: urlParams.get('vbx_console') || urlParams.get('vbx_from') || 'ps5', // 'ps5' | 'xbox' | 'viceos'
-    emulatedGame: urlParams.get('vbx_mode') || (isExpGta6 ? 'gta6' : 'gta5'),    // 'gta5' | 'gta6' | 'all'
-    isGta6Sandbox: urlParams.get('vbx_title') === 'gta6' || isExpGta6,
+    emulatedGame: urlParams.get('vbx_mode') || 'gta5', // 'gta5' | 'gta6' | 'all'
+    isGta6Sandbox: urlParams.get('vbx_title') === 'gta6',
     showDebugHud: urlParams.get('vbx_hud') !== '0',
     enableCheatMenu: urlParams.get('vbx_cheats') !== '0',
     motionBlur: urlParams.get('vbx_mblur') === '1',
@@ -555,7 +554,7 @@
     const targetTurn = Math.min(1.0, Math.abs(steering)) * (0.45 + mbMotion.fwdSpeed * 0.55);
     mbMotion.turnRate += (targetTurn - mbMotion.turnRate) * Math.min(1, dtSec * 8.0);
 
-    if (isExpGta6 || !vbxState.motionBlur || vbxState.motionBlurStrength <= 0) {
+    if (!vbxState.motionBlur || vbxState.motionBlurStrength <= 0) {
       if (mbFilterActive) {
         gameCanvas.style.filter = '';
         mbFilterActive = false;
@@ -1221,27 +1220,8 @@
         transition: opacity 0.2s, transform 0.2s; box-shadow: 0 12px 30px rgba(0,0,0,0.6);
       }
       #vbx-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-      /* Non-overlapping docking in Experimental GTA 6 Mode:
-         - Top-center slim pill bar (zero overlap with top-left vitals & top-right cash/ammo/wanted!)
-         - Hardware telemetry box cleanly below GTA 6 top-right cash/ammo/stars block
-         - Hidden during GTA 6 Main Menu & Loading Screen until gameplay begins */
-      body.vbx-gta6-mode #vbx-fab {
-        top: 12px; left: 50%; transform: translateX(-50%); z-index: 99992;
-      }
-      body.vbx-gta6-mode #vbx-hud {
-        top: 142px; right: 24px; z-index: 99991;
-      }
-      body.vbx-gta6-mode #vbx-drawer {
-        top: 54px; left: 50%; transform: translateX(-50%); z-index: 99997;
-      }
-      body.vbx-gta6-mode:not(.vbx-gta6-playing) #vbx-fab,
-      body.vbx-gta6-mode:not(.vbx-gta6-playing) #vbx-hud {
-        display: none !important;
-      }
     `;
     (document.head || document.documentElement).appendChild(style);
-    if (isExpGta6) document.body.classList.add('vbx-gta6-mode');
 
     // Real Hardware Debug HUD
     hudEl = document.createElement('div');

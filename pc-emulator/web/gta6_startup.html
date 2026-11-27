@@ -2,176 +2,339 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grand Theft Auto VI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grand Theft Auto VI — Startup</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    width: 100%; height: 100%; overflow: hidden; background: #000;
-    font-family: 'Bahnschrift', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+    width: 100%; height: 100%; overflow: hidden;
+    background: #000;
     color: #fff;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    user-select: none;
   }
   #stage {
-    position: fixed; inset: 0; background: #000; overflow: hidden;
+    position: fixed; inset: 0;
+    background: #000;
     display: flex; align-items: center; justify-content: center;
   }
-  #intro-video {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; background: #000; opacity: 0;
-    transition: opacity 0.25s ease;
+  #introVid {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+    object-fit: cover;
+    background: #000;
+    opacity: 1;
+    transition: opacity 0.42s ease;
   }
-  #intro-video.ready { opacity: 1; }
-  #fade-curtain {
-    position: fixed; inset: 0; background: #000; opacity: 0;
-    pointer-events: none; z-index: 40; transition: opacity 0.42s ease;
+  #introVid.fade-out { opacity: 0; }
+
+  #skipHint {
+    position: fixed; right: 26px; bottom: 24px; z-index: 30;
+    padding: 8px 14px; border-radius: 999px;
+    background: rgba(0, 0, 0, 0.56);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    opacity: 0; transition: opacity 0.35s ease, transform 0.2s ease;
   }
-  #fade-curtain.on { opacity: 1; }
-  #unmute-pill {
-    position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); z-index: 25;
-    padding: 9px 20px; border-radius: 999px;
-    background: rgba(12, 14, 24, 0.78); backdrop-filter: blur(12px);
-    border: 1px solid rgba(240, 74, 152, 0.72);
-    color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
-    cursor: pointer; display: none; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+  #skipHint.show { opacity: 1; }
+  #skipHint:hover { background: rgba(255, 45, 146, 0.32); border-color: rgba(255, 110, 199, 0.7); }
+
+  #unmutePill {
+    position: fixed; left: 26px; bottom: 24px; z-index: 30;
+    padding: 8px 14px; border-radius: 999px;
+    background: rgba(255, 45, 146, 0.24);
+    border: 1px solid rgba(255, 120, 200, 0.55);
+    color: #fff;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.8px;
+    cursor: pointer; display: none;
+    backdrop-filter: blur(8px);
   }
-  #unmute-pill:hover { background: rgba(240, 74, 152, 0.34); }
-  #skip-pill {
-    position: fixed; right: 28px; bottom: 26px; z-index: 25;
-    padding: 7px 15px; border-radius: 999px;
-    background: rgba(10, 12, 20, 0.54); backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: rgba(255, 255, 255, 0.78); font-size: 11px; font-weight: 700;
-    letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer;
-    opacity: 0; transition: opacity 0.35s ease, background 0.15s, border-color 0.15s;
+
+  #bootPanel {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 42%, rgba(28, 12, 34, 0.92), #000 72%);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.45s ease;
+    padding: 28px;
+    text-align: center;
   }
-  #skip-pill.show { opacity: 1; }
-  #skip-pill:hover { background: rgba(240, 74, 152, 0.28); border-color: rgba(240, 74, 152, 0.72); color: #fff; }
+  #bootPanel.show { opacity: 1; pointer-events: auto; }
+
+  .vbx-logo {
+    font-size: 13px; font-weight: 800; letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #ff6ec7;
+    margin-bottom: 14px;
+  }
+  .vbx-title {
+    font-size: 32px; font-weight: 900; letter-spacing: 2px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, #ff7eb3, #ffffff 48%, #5be7ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+  }
+  .vbx-sub {
+    font-size: 14px; color: #cbd5e1; max-width: 540px; line-height: 1.5;
+    margin-bottom: 24px;
+  }
+  .vbx-bar-wrap {
+    width: min(360px, 76vw); height: 5px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .vbx-bar {
+    width: 44%; height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #ff2d92, #22d3ee);
+    animation: slideBar 1.25s ease-in-out infinite;
+  }
+  @keyframes slideBar {
+    0%   { transform: translateX(-110%); }
+    100% { transform: translateX(260%); }
+  }
+  .vbx-err {
+    display: none;
+    margin-top: 8px;
+    padding: 14px 18px;
+    max-width: 520px;
+    border-radius: 12px;
+    background: rgba(127, 29, 29, 0.45);
+    border: 1px solid rgba(248, 113, 113, 0.55);
+    color: #fecaca;
+    font-size: 13.5px; line-height: 1.5;
+  }
+  .vbx-actions {
+    display: none;
+    gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center;
+  }
+  .vbx-btn {
+    padding: 10px 20px; border-radius: 10px; border: none;
+    font-size: 13px; font-weight: 800; letter-spacing: 0.8px;
+    text-transform: uppercase; cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease;
+  }
+  .vbx-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+  .vbx-btn.primary { background: linear-gradient(135deg, #ec4899, #8b5cf6); color: #fff; }
+  .vbx-btn.ghost   { background: rgba(255, 255, 255, 0.12); color: #f8fafc; border: 1px solid rgba(255,255,255,0.2); }
 </style>
 </head>
 <body>
 <div id="stage">
-  <video id="intro-video" playsinline preload="auto"></video>
+  <video id="introVid" playsinline preload="auto"></video>
+  <button id="unmutePill" type="button">Tap to Unmute Audio</button>
+  <button id="skipHint" type="button">Skip Intro [Space / Click]</button>
+
+  <div id="bootPanel">
+    <div class="vbx-logo">VICEBOX X · FITANYEXE EMBED ENGINE</div>
+    <div class="vbx-title" id="bootTitle">Grand Theft Auto VI</div>
+    <div class="vbx-sub" id="bootStatus">Starting selected executable inside ViceBox X viewport...</div>
+    <div class="vbx-bar-wrap" id="bootBarWrap"><div class="vbx-bar"></div></div>
+    <div class="vbx-err" id="bootErr"></div>
+    <div class="vbx-actions" id="bootActions">
+      <button class="vbx-btn primary" id="retryBtn" type="button">Retry Launch</button>
+      <button class="vbx-btn ghost" id="backBtn" type="button">Return to Console</button>
+    </div>
+  </div>
 </div>
-<button id="unmute-pill">Click to Enable Audio</button>
-<button id="skip-pill">Skip &nbsp;[Space / ✕]</button>
-<div id="fade-curtain"></div>
 
 <script>
 (function () {
   'use strict';
 
-  // Preserve every gameplay query parameter (mode, map, res, fps, vbx_from, vbx_perf_auto, args...)
-  // and pass vbx_intro_done=1 so /play/ lands directly on the GTA VI Main Menu after this intro finishes.
-  const qs = new URLSearchParams(window.location.search);
-  qs.set('vbx_gta6', '1');
-  qs.set('vbx_intro_done', '1');
-  qs.delete('vbx_skip_intro');
-  if (!qs.get('mode')) qs.set('mode', 'sandbox');
-  const targetPlayUrl = '/play/?' + qs.toString();
+  const params = new URLSearchParams(window.location.search);
+  const fromConsole = (params.get('vbx_from') || 'ps5').toLowerCase();
+  const returnPath = (fromConsole === 'xbox') ? '/xbox/' : (fromConsole === 'viceos' ? '/viceos/' : '/ps5/');
 
-  const video = document.getElementById('intro-video');
-  const unmuteBtn = document.getElementById('unmute-pill');
-  const skipBtn = document.getElementById('skip-pill');
-  const curtain = document.getElementById('fade-curtain');
+  const vid         = document.getElementById('introVid');
+  const skipHint    = document.getElementById('skipHint');
+  const unmutePill  = document.getElementById('unmutePill');
+  const bootPanel   = document.getElementById('bootPanel');
+  const bootTitle   = document.getElementById('bootTitle');
+  const bootStatus  = document.getElementById('bootStatus');
+  const bootBarWrap = document.getElementById('bootBarWrap');
+  const bootErr     = document.getElementById('bootErr');
+  const bootActions = document.getElementById('bootActions');
+  const retryBtn    = document.getElementById('retryBtn');
+  const backBtn     = document.getElementById('backBtn');
 
-  let done = false;
-  let hardTimer = null;
+  let launched = false;
+  let pollTimer = null;
 
-  function proceedToMenu() {
-    if (done) return;
-    done = true;
-    clearTimeout(hardTimer);
-    curtain.classList.add('on');
-    try { video.pause(); } catch (e) {}
-    setTimeout(() => { window.location.replace(targetPlayUrl); }, 380);
+  function showError(msg) {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    bootBarWrap.style.display = 'none';
+    bootStatus.textContent = 'Could not embed the selected executable inside ViceBox X.';
+    bootErr.textContent = msg || 'Unknown launch error.';
+    bootErr.style.display = 'block';
+    bootActions.style.display = 'flex';
   }
 
-  // Reveal subtle skip pill after 1.1s so the opening frames stay completely pure
-  setTimeout(() => { if (!done) skipBtn.classList.add('show'); }, 1100);
-  // Generous safety cap (22s for 16s intro) so playback can never stall forever
-  hardTimer = setTimeout(proceedToMenu, 22000);
+  function pollFitStatus() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/vbx/api/fitanyexe-status', { cache: 'no-store' });
+        if (!res.ok) return;
+        const st = await res.json();
+        if (st.exeName) {
+          bootTitle.textContent = st.exeName;
+        }
+        if (st.state === 'launching') {
+          bootStatus.textContent = 'Capturing ' + (st.exeName || 'executable') + ' window & stripping native chrome into emulator viewport...';
+        } else if (st.state === 'embedded') {
+          bootStatus.textContent = (st.exeName || 'Executable') + ' embedded inside ViceBox X viewport.';
+          clearInterval(pollTimer);
+          pollTimer = null;
+        } else if (st.state === 'error') {
+          showError(st.error || 'The selected .exe failed to open an embeddable window.');
+        }
+      } catch (_) {}
+    }, 200);
+  }
 
-  skipBtn.addEventListener('click', (e) => { e.stopPropagation(); proceedToMenu(); });
+  async function launchEmbeddedExe() {
+    if (launched) return;
+    launched = true;
 
-  unmuteBtn.addEventListener('click', (e) => {
+    try { vid.pause(); } catch (_) {}
+    vid.classList.add('fade-out');
+    skipHint.classList.remove('show');
+    unmutePill.style.display = 'none';
+
+    bootErr.style.display = 'none';
+    bootActions.style.display = 'none';
+    bootBarWrap.style.display = 'block';
+    bootStatus.textContent = 'Launching selected .exe directly inside ViceBox X viewport...';
+    bootPanel.classList.add('show');
+
+    try {
+      const res = await fetch('/vbx/api/fitanyexe-launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromConsole })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showError((data && data.error) ? data.error : 'Failed to start selected .exe.');
+        return;
+      }
+      if (data.exeName) {
+        bootTitle.textContent = data.exeName;
+        bootStatus.textContent = 'Capturing ' + data.exeName + ' window & stripping native chrome into emulator viewport...';
+      }
+      pollFitStatus();
+    } catch (err) {
+      showError('Connection error while contacting ViceBox X host: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  retryBtn.addEventListener('click', () => {
+    launched = false;
+    launchEmbeddedExe();
+  });
+
+  backBtn.addEventListener('click', () => {
+    window.location.href = returnPath;
+  });
+
+  // Skip controls: Space / Enter / Escape / Click / Gamepad A/X/Start
+  skipHint.addEventListener('click', (e) => { e.stopPropagation(); launchEmbeddedExe(); });
+  vid.addEventListener('click', () => {
+    if (vid.muted) {
+      vid.muted = false;
+      unmutePill.style.display = 'none';
+    } else if (vid.currentTime > 0.6) {
+      launchEmbeddedExe();
+    }
+  });
+  unmutePill.addEventListener('click', (e) => {
     e.stopPropagation();
-    video.muted = false;
-    video.volume = 1.0;
-    video.play().catch(() => {});
-    unmuteBtn.style.display = 'none';
+    vid.muted = false;
+    vid.volume = 1.0;
+    unmutePill.style.display = 'none';
   });
 
   window.addEventListener('keydown', (e) => {
+    if (launched) return;
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
       e.preventDefault();
-      proceedToMenu();
+      launchEmbeddedExe();
     }
   });
 
-  // Allow PS5 DualSense / Xbox controller (Cross/A, Circle/B, Options/Start) to skip cleanly
-  let padInit = false;
-  let prevSkipHeld = true;
-  function pollGamepad() {
-    if (done) return;
+  // Gamepad polling so DualSense X / Xbox A skips intro cleanly
+  (function pollPad() {
+    if (launched) return;
     try {
       const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-      let skipDown = false;
-      for (let i = 0; i < pads.length; i++) {
-        const gp = pads[i];
-        if (!gp || !gp.connected) continue;
-        const b = gp.buttons;
-        if ((b[0] && b[0].pressed) || (b[1] && b[1].pressed) || (b[9] && b[9].pressed)) {
-          skipDown = true;
+      for (const p of pads) {
+        if (!p || !p.buttons) continue;
+        if ((p.buttons[0] && p.buttons[0].pressed) || (p.buttons[9] && p.buttons[9].pressed)) {
+          if (vid.currentTime > 0.5) {
+            launchEmbeddedExe();
+            return;
+          }
         }
       }
-      if (!padInit) { padInit = true; prevSkipHeld = skipDown; }
-      else if (skipDown && !prevSkipHeld) { proceedToMenu(); return; }
-      prevSkipHeld = skipDown;
-    } catch (e) {}
-    requestAnimationFrame(pollGamepad);
-  }
-  requestAnimationFrame(pollGamepad);
+    } catch (_) {}
+    requestAnimationFrame(pollPad);
+  })();
 
-  video.addEventListener('loadeddata', () => {
-    video.classList.add('ready');
-  });
-  video.addEventListener('ended', proceedToMenu);
-  video.addEventListener('error', () => {
-    // If embedded video somehow fails, proceed immediately without hanging
-    setTimeout(proceedToMenu, 250);
-  });
-
-  async function startNativePlayback() {
-    let srcUrl = '/vbx/media/gta6_intro.mp4';
+  // Start embedded official GTA VI startup intro .mp4 immediately
+  async function bootIntro() {
+    let mp4Url = '/vbx/media/gta6_intro.mp4';
     try {
-      const r = await fetch('/vbx/api/intro-status', { cache: 'no-store' });
-      const info = await r.json();
-      if (info && info.ready && info.video) {
-        srcUrl = info.video;
+      const stRes = await fetch('/vbx/api/intro-status', { cache: 'no-store' });
+      if (stRes.ok) {
+        const st = await stRes.json();
+        if (!st.ready) {
+          launchEmbeddedExe();
+          return;
+        }
+        if (st.url) mp4Url = st.url;
       }
-    } catch (e) {}
+    } catch (_) {}
 
-    video.src = srcUrl;
-    video.muted = false;
-    video.volume = 1.0;
+    vid.src = mp4Url;
+    vid.muted = false;
+    vid.volume = 1.0;
+
+    vid.addEventListener('ended', () => launchEmbeddedExe());
+    vid.addEventListener('error', () => launchEmbeddedExe());
+
+    setTimeout(() => {
+      if (!launched) skipHint.classList.add('show');
+    }, 900);
+
+    // Safety fallback if video fails to begin playback within 6s
+    const startGuard = setTimeout(() => {
+      if (!launched && vid.currentTime < 0.05) {
+        launchEmbeddedExe();
+      }
+    }, 6000);
+
+    vid.addEventListener('playing', () => clearTimeout(startGuard), { once: true });
 
     try {
-      await video.play();
-      video.classList.add('ready');
-    } catch (err) {
-      // Browser autoplay policy blocked unmuted playback before user gesture: start muted immediately + show crisp unmute pill
-      video.muted = true;
+      await vid.play();
+    } catch (_) {
+      // Autoplay audio fallback
       try {
-        await video.play();
-        video.classList.add('ready');
-        unmuteBtn.style.display = 'block';
-      } catch (err2) {
-        proceedToMenu();
+        vid.muted = true;
+        await vid.play();
+        unmutePill.style.display = 'block';
+      } catch (_) {
+        launchEmbeddedExe();
       }
     }
   }
 
-  startNativePlayback();
+  bootIntro();
 })();
 </script>
 </body>

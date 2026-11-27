@@ -20,6 +20,7 @@
 #include "local_server.h"
 #include "launcher.h"
 #include "webview_host.h"
+#include "exe_embed_host.h"
 #include "ui_draw.h"
 
 #include <algorithm>
@@ -63,8 +64,9 @@ static float g_NavLeftX = 300.0f;
 static float g_NavRightX = 820.0f;
 static float g_RightControlsMinX = 880.0f;
 
-// Embedded WebView2 Viewport Host & Borderless Fullscreen State
+// Embedded WebView2 Viewport Host, Embedded .EXE Host (fitanyexe) & Borderless Fullscreen State
 static vicebox::EmbeddedViewportHost* g_ViewportHost = nullptr;
+static vicebox::EmbeddedExeHost*      g_ExeHost      = nullptr;
 static bool g_BorderlessFs = false;
 static WINDOWPLACEMENT g_PrevPlacement = { sizeof(WINDOWPLACEMENT) };
 
@@ -73,10 +75,14 @@ static int ActiveViewportTopOffset() {
 }
 
 static void SyncViewportBounds() {
-    if (!g_ViewportHost || !g_hWnd) return;
+    if (!g_hWnd) return;
     RECT rc{};
     if (GetClientRect(g_hWnd, &rc)) {
-        g_ViewportHost->Resize(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+        const int top = ActiveViewportTopOffset();
+        const int w = rc.right - rc.left;
+        const int h = rc.bottom - rc.top;
+        if (g_ViewportHost) g_ViewportHost->Resize(top, w, h);
+        if (g_ExeHost)      g_ExeHost->Resize(top, w, h);
     }
 }
 
@@ -265,6 +271,7 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case WM_MOVE:
             if (g_ViewportHost) g_ViewportHost->NotifyParentMoved();
+            if (g_ExeHost)      g_ExeHost->NotifyParentMoved();
             return 0;
 
         case WM_SIZE:
@@ -386,15 +393,13 @@ struct AppState {
         s.resIndex           = config.resIndex;
         s.gta5Mode           = config.gta5Mode;
         s.isFoxxyDev            = isFoxxyDev;
-        s.devGta6Enabled        = isFoxxyDev && (config.devGta6Enabled || config.devExpGta6);
-        s.devExpGta6            = isFoxxyDev && config.devExpGta6;
-        s.devPerfAuto           = config.devPerfAuto;
+        s.devGta6Enabled        = isFoxxyDev && (config.devGta6Enabled || config.devFitAnyExe);
+        s.devFitAnyExe          = isFoxxyDev && config.devFitAnyExe;
         s.devGta6ExePath        = config.devGta6ExePath;
         s.devFullOverlay        = config.devFullOverlay;
         s.devFakeFpsEnabled     = config.devFakeFpsEnabled;
         s.devFakeFpsLimit       = config.devFakeFpsLimit;
         s.customGta5PlayPath    = BuildLocalGta5PlayPath(config);
-        s.customExpGta6PlayPath = BuildExperimentalGta6PlayPath(config);
     }
 
     void PullFromSharedIfDirty(SharedEmulatorState& s, std::mutex& mu) {
@@ -411,13 +416,11 @@ struct AppState {
                 config.motionBlur         = s.motionBlur;
                 config.motionBlurStrength = s.motionBlurStrength;
                 config.optimizationMode   = s.optimizationMode;
-                config.devPerfAuto        = s.devPerfAuto;
                 config.lookSensitivity    = std::max(20, std::min(300, s.lookSensitivity));
                 if (!s.profileName.empty() && s.profileName != signedInUser) {
                     signedInUser = s.profileName;
                 }
                 s.customGta5PlayPath    = BuildLocalGta5PlayPath(config);
-                s.customExpGta6PlayPath = BuildExperimentalGta6PlayPath(config);
             }
         }
         if (dirty) {
@@ -543,7 +546,7 @@ static const char* GetConsoleTag(int target) {
 static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sfx,
                             ParticleSystem& particles, LocalHttpServer& server,
                             SharedEmulatorState& shared, std::mutex& sharedMu,
-                            EmbeddedViewportHost& viewportHost,
+                            EmbeddedViewportHost& viewportHost, EmbeddedExeHost& exeHost,
                             float winW, float dt, float time) {
     if (g_BorderlessFs) return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -558,38 +561,38 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         ColAlpha(topAccentL, 0.90f), ColAlpha(Palette::Cyan, 0.88f),
         ColAlpha(Palette::VicePink, 0.88f), ColAlpha(topAccentL, 0.90f));
 
+    const bool anyLiveViewport = viewportHost.IsVisible() || exeHost.IsVisible();
+
     // Left: ViceBox X Logo + Brand Title
     DrawViceBoxLogo(dl, ImVec2(28.0f, 27.0f), 13.5f, time, 1.0f);
     ImGui::PushFont(fonts.bold);
     dl->AddText(ImVec2(50.0f, 11.0f), ColAlpha(Palette::TextHi, 1.0f), "VICEBOX X");
     ImGui::PopFont();
     ImGui::PushFont(fonts.mono);
-    dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f),
-                viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v2.9"
-                                         : "PS5 · XBOX · VICEOS  //  v2.9");
+    const char* subHdr = exeHost.IsVisible()
+        ? "EMBEDDED .EXE VIEWPORT  //  v3.0"
+        : (viewportHost.IsVisible() ? "LIVE EMBEDDED VIEWPORT  //  v3.0"
+                                    : "PS5 · XBOX · VICEOS  //  v3.0");
+    dl->AddText(ImVec2(50.0f, 30.0f), ColAlpha(Palette::TextDim, 0.95f), subHdr);
     ImGui::PopFont();
 
-    // Center Controls: LIVE EMBEDDED VIEWPORT TOOLBAR when game/console is active inside window,
+    // Center Controls: LIVE EMBEDDED VIEWPORT TOOLBAR when WebView2 or fitanyexe .exe is active inside window,
     // otherwise Dashboard Navigation Tabs!
-    if (app.screen == AppScreen::Dashboard && viewportHost.IsVisible()) {
+    if (app.screen == AppScreen::Dashboard && anyLiveViewport) {
         struct VpBtn { const char* id; const char* lbl; float w; ImVec4 col; int action; };
-        const bool exp6On = app.isFoxxyDev && app.config.devExpGta6;
-        const VpBtn btns[8] = {
+        const bool isExeLive = exeHost.IsVisible();
+        const VpBtn btns[7] = {
             { "##vp_back",   "< LAUNCHER", 96.0f, Palette::TextMid,  0 },
             { "##vp_ps5",    "PS5",        48.0f, kPs5Blue,          1 },
             { "##vp_xbox",   "XBOX",       54.0f, Palette::Emerald,  2 },
             { "##vp_viceos", "VICEOS",     64.0f, Palette::Cyan,     3 },
             { "##vp_gta5",   "GTA V",      58.0f, Palette::VicePink, 4 },
-            { "##vp_gta6",   "GTA VI",     62.0f, Palette::VicePink, 7 },
             { "##vp_full",   "FULLSCREEN", 88.0f, kDevGold,          5 },
-            { "##vp_stop",   "STOP",       52.0f, ImVec4(0.95f, 0.24f, 0.34f, 1.0f), 6 }
+            { "##vp_stop",   isExeLive ? "STOP .EXE" : "STOP", isExeLive ? 78.0f : 52.0f, ImVec4(0.95f, 0.24f, 0.34f, 1.0f), 6 }
         };
         float totalW = 0.0f;
-        int visCount = 0;
-        for (int i = 0; i < 8; ++i) {
-            if (btns[i].action == 7 && !exp6On) continue;
-            totalW += btns[i].w + (visCount > 0 ? 5.0f : 0.0f);
-            ++visCount;
+        for (int i = 0; i < 7; ++i) {
+            totalW += btns[i].w + (i > 0 ? 5.0f : 0.0f);
         }
         float startX = (winW - totalW) * 0.5f;
         if (startX < 248.0f) startX = 248.0f;
@@ -599,21 +602,20 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         dl->AddRectFilled(ImVec2(startX - 6.0f, 9.0f), ImVec2(startX + totalW + 6.0f, 45.0f),
                           IM_COL32(10, 15, 28, 224), 10.0f);
         dl->AddRect(ImVec2(startX - 6.0f, 9.0f), ImVec2(startX + totalW + 6.0f, 45.0f),
-                    ColAlpha(Palette::Cyan, 0.22f), 10.0f);
+                    ColAlpha(isExeLive ? Palette::VicePink : Palette::Cyan, 0.28f), 10.0f);
 
         float curX = startX;
         ImGui::PushFont(fonts.mono);
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 7; ++i) {
             const auto& b = btns[i];
-            if (b.action == 7 && !exp6On) continue;
             ImVec2 bp(curX, 13.0f);
             ImGui::SetCursorPos(bp);
             bool clicked = ImGui::InvisibleButton(b.id, ImVec2(b.w, 28.0f));
             bool hov = ImGui::IsItemHovered();
-            bool isActiveConsole =
+            bool isActiveConsole = !isExeLive && (
                 (b.action == 1 && app.config.consoleTarget == 0) ||
                 (b.action == 2 && app.config.consoleTarget == 1) ||
-                (b.action == 3 && app.config.consoleTarget == 2);
+                (b.action == 3 && app.config.consoleTarget == 2));
             float bgAlpha = hov ? 0.34f : (isActiveConsole ? 0.22f : 0.11f);
             float brdAlpha = hov ? 0.90f : (isActiveConsole ? 0.65f : 0.32f);
             dl->AddRectFilled(bp, ImVec2(bp.x + b.w, bp.y + 28.0f),
@@ -628,9 +630,19 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
             if (clicked) {
                 sfx.Play(SfxId::Click, 0.70f);
                 if (b.action == 0) {
-                    viewportHost.Hide();
-                    app.ShowToast("Viewport paused in background — click RESUME GAME anytime", Palette::Cyan);
+                    if (isExeLive) {
+                        exeHost.Hide();
+                        app.ShowToast("Embedded .exe hidden in background — click RESUME .EXE anytime", Palette::VicePink);
+                    } else {
+                        viewportHost.Hide();
+                        app.ShowToast("Viewport paused in background — click RESUME GAME anytime", Palette::Cyan);
+                    }
                 } else if (b.action >= 1 && b.action <= 3) {
+                    if (exeHost.IsActive()) {
+                        exeHost.Stop();
+                        std::lock_guard<std::mutex> lk(sharedMu);
+                        shared.fitExeState = "idle";
+                    }
                     int newCt = b.action - 1;
                     app.config.consoleTarget = newCt;
                     SaveConfig(app.config);
@@ -640,36 +652,50 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
                     viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
                     app.PushLog(std::string("[VIEWPORT] Live switched console to ") + GetConsoleTag(newCt));
                 } else if (b.action == 4) {
+                    if (exeHost.IsActive()) {
+                        exeHost.Stop();
+                        std::lock_guard<std::mutex> lk(sharedMu);
+                        shared.fitExeState = "idle";
+                    }
                     app.SyncToShared(shared, sharedMu, "gta5");
                     std::string u = server.BaseUrl() + BuildLocalGta5PlayPath(app.config) + "&vbx_from=" +
                         (app.config.consoleTarget == 2 ? "viceos" : (app.config.consoleTarget == 1 ? "xbox" : "ps5"));
                     RECT rc{}; GetClientRect(g_hWnd, &rc);
                     viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
                     app.PushLog("[VIEWPORT] Direct GTA V WebGPU launch inside embedded viewport -> " + u);
-                } else if (b.action == 7) {
-                    app.SyncToShared(shared, sharedMu, "gta6");
-                    std::string tag = (app.config.consoleTarget == 2) ? "viceos"
-                                    : ((app.config.consoleTarget == 1) ? "xbox" : "ps5");
-                    std::string u = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) +
-                        "&vbx_console=" + tag + "&vbx_from=" + tag;
-                    RECT rc{}; GetClientRect(g_hWnd, &rc);
-                    viewportHost.OpenUrl(u, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
-                    app.PushLog("[VIEWPORT] Experimental GTA 6 Sandbox launch inside embedded viewport -> " + u);
                 } else if (b.action == 5) {
                     SetBorderlessFullscreen(g_hWnd, !g_BorderlessFs);
                 } else if (b.action == 6) {
                     if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
-                    viewportHost.StopSession();
-                    app.PushLog("[VIEWPORT] Stopped embedded emulator viewport");
-                    app.ShowToast("Embedded Emulator Viewport stopped", Palette::TextMid);
+                    if (isExeLive) {
+                        std::string stoppedName = exeHost.ExeName();
+                        exeHost.Stop();
+                        std::string retRoute;
+                        {
+                            std::lock_guard<std::mutex> lk(sharedMu);
+                            shared.fitExeState = "idle";
+                            retRoute = (shared.fitExeReturnConsole == "xbox") ? "/xbox/"
+                                     : (shared.fitExeReturnConsole == "viceos" ? "/viceos/" : "/ps5/");
+                        }
+                        RECT rc{}; GetClientRect(g_hWnd, &rc);
+                        viewportHost.OpenUrl(server.BaseUrl() + retRoute, ActiveViewportTopOffset(),
+                                             rc.right - rc.left, rc.bottom - rc.top);
+                        app.PushLog("[FITANYEXE] Stopped embedded .exe (" + stoppedName + ") & restored console UI");
+                        app.ShowToast("Stopped embedded .exe — returned to console UI", Palette::VicePink);
+                    } else {
+                        viewportHost.StopSession();
+                        app.PushLog("[VIEWPORT] Stopped embedded emulator viewport");
+                        app.ShowToast("Embedded Emulator Viewport stopped", Palette::TextMid);
+                    }
                 }
             }
             if (hov) {
-                if (b.action == 0) ImGui::SetTooltip("Return to ViceBox X Launcher (keeps game running)");
+                if (b.action == 0) ImGui::SetTooltip(isExeLive ? "Return to ViceBox X Launcher (keeps .exe running)"
+                                                               : "Return to ViceBox X Launcher (keeps game running)");
                 else if (b.action == 4) ImGui::SetTooltip("Boot Grand Theft Auto V directly inside this viewport");
-                else if (b.action == 7) ImGui::SetTooltip("Boot Experimental GTA 6 Sandbox directly inside this viewport");
                 else if (b.action == 5) ImGui::SetTooltip("Toggle Edge-to-Edge Fullscreen (F11)");
-                else if (b.action == 6) ImGui::SetTooltip("Close game & free viewport GPU/RAM");
+                else if (b.action == 6) ImGui::SetTooltip(isExeLive ? "Terminate embedded .exe & return to console dashboard"
+                                                                    : "Close game & free viewport GPU/RAM");
             }
             curX += b.w + 5.0f;
         }
@@ -839,6 +865,7 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
         if (ImGui::InvisibleButton("##operator_pill", ImVec2(bw, 26.0f))) {
             sfx.Play(SfxId::TabSwitch, 0.80f);
             if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
+            if (exeHost.IsActive()) exeHost.Stop();
             if (viewportHost.HasActiveSession()) viewportHost.StopSession();
             app.screen = AppScreen::Login;
             app.loginFade = 0.0f;
@@ -854,10 +881,12 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
             ImGui::SetTooltip("Signed in as %s — click to switch account", app.signedInUser.c_str());
         }
 
-        // If user stepped back to Launcher while a game/console session is still alive, offer 1-click RESUME!
-        if (!viewportHost.IsVisible() && viewportHost.HasActiveSession()) {
+        // If user stepped back to Launcher while an embedded .exe or console session is alive, offer 1-click RESUME!
+        const bool canResumeExe = exeHost.IsEmbedded() && !exeHost.IsVisible();
+        const bool canResumeVp  = !canResumeExe && !viewportHost.IsVisible() && !exeHost.IsVisible() && viewportHost.HasActiveSession();
+        if (canResumeExe || canResumeVp) {
             rightX -= 10.0f;
-            const char* resLbl = "RESUME GAME";
+            const char* resLbl = canResumeExe ? "RESUME .EXE" : "RESUME GAME";
             ImGui::PushFont(fonts.mono);
             ImVec2 rTs = ImGui::CalcTextSize(resLbl);
             float rW = rTs.x + 22.0f;
@@ -867,19 +896,26 @@ static void RenderHeaderBar(AppState& app, const FontSet& fonts, SoundEngine& sf
             bool clickedRes = ImGui::InvisibleButton("##resume_vp_btn", ImVec2(rW, 28.0f));
             bool rHov = ImGui::IsItemHovered();
             float pulse = 0.65f + 0.35f * std::sin(time * 4.0f);
+            ImVec4 rCol = canResumeExe ? Palette::VicePink : Palette::Emerald;
             dl->AddRectFilled(rp, ImVec2(rp.x + rW, rp.y + 28.0f),
-                              ColAlpha(ImVec4(0.08f, 0.86f, 0.48f, rHov ? 0.38f : (0.20f + 0.08f * pulse)), 1.0f), 8.0f);
+                              ColAlpha(ImVec4(rCol.x, rCol.y, rCol.z, rHov ? 0.38f : (0.20f + 0.08f * pulse)), 1.0f), 8.0f);
             dl->AddRect(rp, ImVec2(rp.x + rW, rp.y + 28.0f),
-                        ColAlpha(Palette::Emerald, rHov ? 1.0f : (0.65f + 0.25f * pulse)), 8.0f, 0, 1.4f);
+                        ColAlpha(rCol, rHov ? 1.0f : (0.65f + 0.25f * pulse)), 8.0f, 0, 1.4f);
             dl->AddText(ImVec2(rp.x + 11.0f, rp.y + (28.0f - rTs.y) * 0.5f),
                         ColAlpha(Palette::TextHi, 1.0f), resLbl);
             ImGui::PopFont();
             if (clickedRes) {
                 sfx.Play(SfxId::Launch, 0.75f);
                 RECT rc{}; GetClientRect(g_hWnd, &rc);
-                viewportHost.Show(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+                if (canResumeExe) {
+                    viewportHost.Hide();
+                    exeHost.Show(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+                } else {
+                    viewportHost.Show(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+                }
             }
-            if (rHov) ImGui::SetTooltip("Return to your live embedded Console / GTA V session");
+            if (rHov) ImGui::SetTooltip(canResumeExe ? "Return to your embedded .exe inside ViceBox X"
+                                                     : "Return to your live embedded Console / GTA V session");
         }
     }
 
@@ -1058,25 +1094,24 @@ static void RenderLoginScreen(AppState& app, const FontSet& fonts, SoundEngine& 
     ImGui::PopStyleVar();
 }
 
-// ==================== HELPER TO LAUNCH CONSOLE / UPDATES / EXPERIMENTAL GTA 6 ====================
+// ==================== HELPER TO LAUNCH CONSOLE / UPDATES / FITANYEXE ====================
 static void TriggerConsoleLaunch(AppState& app, LocalHttpServer& server,
                                  SharedEmulatorState& shared, std::mutex& sharedMu,
                                  SoundEngine& sfx, ParticleSystem& particles, ImVec2 burstPos,
                                  const char* emulatedGame, bool openGta6UpdatesPage = false,
-                                 bool launchExpGta6Direct = false) {
+                                 bool launchFitAnyExeDirect = false) {
     if (!server.IsRunning()) {
         app.ShowToast("Local emulator server failed to bind port.", Palette::VicePink);
         return;
     }
 
-    if (launchExpGta6Direct) {
+    if (launchFitAnyExeDirect) {
         app.SyncToShared(shared, sharedMu, "gta6");
         std::string fromTag = (app.config.consoleTarget == 2) ? "viceos"
                             : ((app.config.consoleTarget == 1) ? "xbox" : "ps5");
-        app.launchTargetUrl = server.BaseUrl() + BuildExperimentalGta6PlayPath(app.config) +
-                              "&vbx_console=" + fromTag + "&vbx_from=" + fromTag;
-        app.launchBannerTitle = "BOOTING EXPERIMENTAL GTA VI SANDBOX";
-        app.launchSubtitle = "Leonida WebGPU Pipeline · Vice City Lighting & Motion Blur · Performance: Auto";
+        app.launchTargetUrl = server.BaseUrl() + "/gta6/boot?mode=fitanyexe&vbx_from=" + fromTag;
+        app.launchBannerTitle = "BOOTING GTA VI  ·  FITANYEXE EMBED";
+        app.launchSubtitle = "Playing Embedded GTA VI Intro .MP4 -> Embedding Selected .EXE Inside Emulator GUI";
         app.launchAccent = Palette::VicePink;
     } else if (openGta6UpdatesPage) {
         app.SyncToShared(shared, sharedMu, "gta5");
@@ -1317,8 +1352,8 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         if (app.gta6ShakeT > 0.0f) app.gta6ShakeT = std::max(0.0f, app.gta6ShakeT - dt * 3.0f);
         float shakeX = (app.gta6ShakeT > 0.0f) ? std::sin(app.gta6ShakeT * 42.0f) * app.gta6ShakeT * 8.0f : 0.0f;
 
-        const bool expGta6Active = app.isFoxxyDev && app.config.devExpGta6;
-        const bool devGta6Ready  = app.isFoxxyDev && (app.config.devGta6Enabled || app.config.devExpGta6);
+        const bool fitExeActive = app.isFoxxyDev && app.config.devFitAnyExe && IsExeFilePath(app.config.devGta6ExePath);
+        const bool devGta6Ready = app.isFoxxyDev && (app.config.devGta6Enabled || app.config.devFitAnyExe);
 
         float lift = app.card6Hover * (devGta6Ready ? 4.5f : 2.8f);
         ImVec2 cMin(marginX + cardW + gap + shakeX, cardsTop - lift);
@@ -1328,7 +1363,7 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         bool inCard6 = !app.launching && mp.x >= cMin.x && mp.x <= cMax.x && mp.y >= cardsTop - 6.0f && mp.y <= cardsTop + cardH;
         app.card6Hover = ExpLerp(app.card6Hover, inCard6 ? 1.0f : 0.0f, 11.0f, dt);
 
-        ImVec4 c6Accent = expGta6Active ? Palette::VicePink : (devGta6Ready ? kDevGold : Palette::VicePink);
+        ImVec4 c6Accent = fitExeActive ? Palette::VicePink : (devGta6Ready ? kDevGold : Palette::VicePink);
         DrawGlassCard(dl, cMin, cMax, 16.0f, c6Accent, app.card6Hover, alpha, !devGta6Ready);
 
         float bannerH = std::min(134.0f, cardH * 0.32f);
@@ -1337,11 +1372,11 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         DrawGta6BannerArt(dl, bMin, bMax, time, app.card6Hover, alpha);
 
         DrawStatusPill(dl, ImVec2(cMin.x + 18.0f, cMin.y + 14.0f),
-                       expGta6Active ? "EXPERIMENTAL GTA 6 · SANDBOX"
-                                     : (devGta6Ready ? "FOXXY DEV · GTA VI ACTIVE" : "IN DEVELOPMENT · CYBERLEEKS"),
+                       fitExeActive ? "FOXXY DEV · FITANYEXE EMBED"
+                                    : (devGta6Ready ? "FOXXY DEV · GTA VI ACTIVE" : "IN DEVELOPMENT · CYBERLEEKS"),
                        c6Accent, alpha, true);
         ImGui::PushFont(fonts.mono);
-        const char* tag6 = expGta6Active ? "PLAYGTA5 WEBGPU" : (devGta6Ready ? "CUSTOM .EXE HOOK" : "XBOX PORT WIP");
+        const char* tag6 = fitExeActive ? "IN-GUI .EXE + .MP4" : (devGta6Ready ? "CUSTOM .EXE HOOK" : "XBOX PORT WIP");
         ImVec2 t6s = ImGui::CalcTextSize(tag6);
         dl->AddText(ImVec2(cMax.x - t6s.x - 18.0f, cMin.y + 19.0f), ColAlpha(Palette::Cyan, 0.88f * alpha), tag6);
         ImGui::PopFont();
@@ -1353,15 +1388,15 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         y += 28.0f;
 
         dl->AddText(ImVec2(cMin.x + 22.0f, y), ColAlpha(Palette::TextMid, 0.92f * alpha),
-                    expGta6Active ? "Experimental GTA 6 Active — Leonida Sandbox, Vice Lighting & 2026 HUD"
-                                  : (devGta6Ready ? "Developer Override Active — Launch GTA VI inside Console UI"
-                                                  : "Grand Theft Auto VI — Cyberleeks Xbox-to-PS5 Port Status"));
+                    fitExeActive ? "fitanyexe Armed — GTA VI Intro .MP4 -> Selected .EXE Embedded Inside GUI"
+                                 : (devGta6Ready ? "Developer Override Active — Launch GTA VI inside Console UI"
+                                                 : "Grand Theft Auto VI — Cyberleeks Xbox-to-PS5 Port Status"));
         y += 24.0f;
 
         const char* specs6[3] = {
-            expGta6Active ? "WEBGPU SANDBOX" : "RAGE9 XBSX",
-            expGta6Active ? "GTX 1050 60FPS" : (devGta6Ready ? "Console-Only Exec" : "PS5 Port Pending"),
-            expGta6Active ? "Lucia & Jason"  : "Cyberleeks CL-0.94"
+            fitExeActive ? "GTA VI INTRO .MP4" : "RAGE9 XBSX",
+            fitExeActive ? "IN-VIEWPORT .EXE"  : (devGta6Ready ? "Console-Only Exec" : "PS5 Port Pending"),
+            fitExeActive ? "CHROME STRIPPED"   : "Cyberleeks CL-0.94"
         };
         float sx = cMin.x + 22.0f;
         ImGui::PushFont(fonts.mono);
@@ -1384,15 +1419,16 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
             dl->AddRectFilled(boxMin, boxMax, ColAlpha(ImVec4(0.035f, 0.042f, 0.075f, 0.82f), alpha), 9.0f);
             dl->AddRect(boxMin, boxMax, ColAlpha(ImVec4(c6Accent.x, c6Accent.y, c6Accent.z, 0.28f), alpha), 9.0f);
             std::string boxTxt;
-            if (expGta6Active) {
-                boxTxt = "Experimental GTA 6 overrides the GTA VI launch target with the reskinned PlayGTA5 Sandbox:\n"
-                         "GTA VI Intro & Menu, 2026 Minimap/HUD/Weapon Wheel/Phone, Lucia & Jason Physics, Vice Lighting & Motion Blur.";
+            if (fitExeActive) {
+                std::string fn = app.config.devGta6ExePath;
+                if (fn.size() > 54) fn = "..." + fn.substr(fn.size() - 51);
+                boxTxt = "fitanyexe Target: " + fn + "\nPlaying GTA VI inside PS5/Xbox/ViceOS plays the embedded intro .mp4 first, then embeds your .exe directly INSIDE ViceBox X.";
             } else if (devGta6Ready) {
                 std::string fn = app.config.devGta6ExePath.empty() ? "(No file picked — configure in DEVELOPER tab)" : app.config.devGta6ExePath;
                 if (fn.size() > 54) fn = "..." + fn.substr(fn.size() - 51);
-                boxTxt = "Dev Target: " + fn + "\nBoots console UI with GTA VI mounted; your custom file launches ONLY when played inside PS5/Xbox UI.";
+                boxTxt = "Dev Target: " + fn + "\nBoots console UI with GTA VI mounted; enable 'fitanyexe' in DEVELOPER tab to embed .exe inside ViceBox X GUI.";
             } else if (app.isFoxxyDev) {
-                boxTxt = "Foxxy Dev Mode Unlocked! Open the DEVELOPER tab (top header) to toggle Experimental GTA 6 or bind ANY file type.";
+                boxTxt = "Foxxy Dev Mode Unlocked! Open the DEVELOPER tab (top header) to toggle 'fitanyexe' or bind ANY .exe / file.";
             } else {
                 boxTxt = "Live GTA VI Dev Build: runs at 5 FPS per 20 seconds (game fully works, semi-playable — only FPS optimization needed).\nClick below for full Cyberleeks GTA 6 Updates!";
             }
@@ -1404,29 +1440,26 @@ static void RenderEmulatorsTab(AppState& app, const FontSet& fonts, SoundEngine&
         ImGui::SetCursorPos(ImVec2(cMin.x + 22.0f, cMax.y - 62.0f));
         ImVec2 btnC6{};
         ImGui::PushFont(fonts.bold);
-        const char* cta6 = expGta6Active
-            ? (ct == 2 ? "BOOT VICEOS NEO  (GTA VI)"
-                       : (ct == 1 ? "BOOT XBOX UI  (GTA VI)" : "BOOT PS5 UI  (GTA VI)"))
+        const char* cta6 = fitExeActive
+            ? (ct == 2 ? "BOOT VICEOS NEO  (FITANYEXE)"
+                       : (ct == 1 ? "BOOT XBOX UI  (FITANYEXE)" : "BOOT PS5 UI  (FITANYEXE)"))
             : (devGta6Ready
                 ? (ct == 2 ? "BOOT VICEOS NEO  (GTA VI DEV)"
                            : (ct == 1 ? "BOOT XBOX UI  (GTA VI DEV)" : "BOOT PS5 UI  (GTA VI DEV)"))
                 : (app.isFoxxyDev ? "OPEN FOXXY DEVELOPER SETTINGS" : "VIEW GTA 6 UPDATES  ·  CYBERLEEKS"));
         bool click6 = !app.launching && DrawNeonButton(
             "##btn_gta6", cta6, ImVec2(cardW - 44.0f, 44.0f),
-            expGta6Active ? ImVec4(0.68f, 0.12f, 0.42f, 1.0f) : ((devGta6Ready || app.isFoxxyDev) ? kDevGoldDk : ImVec4(0.56f, 0.09f, 0.34f, 1.0f)),
-            expGta6Active ? Palette::VicePink : ((devGta6Ready || app.isFoxxyDev) ? kDevGold : c6Accent),
+            fitExeActive ? ImVec4(0.68f, 0.12f, 0.42f, 1.0f) : ((devGta6Ready || app.isFoxxyDev) ? kDevGoldDk : ImVec4(0.56f, 0.09f, 0.34f, 1.0f)),
+            fitExeActive ? Palette::VicePink : ((devGta6Ready || app.isFoxxyDev) ? kDevGold : c6Accent),
             app.btnGta6Hover, dt, sfx, false, alpha, &btnC6);
         ImGui::PopFont();
 
         if (click6) {
-            if (expGta6Active) {
-                // Restored PS5/Xbox/ViceOS console boot flow: mounts GTA VI on PS5 Dashboard so Play launches Experimental GTA 6!
-                TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta6", false, false);
-            } else if (devGta6Ready) {
+            if (devGta6Ready) {
                 if (app.config.devGta6ExePath.empty()) {
                     app.activeTab = 3;
                     app.tabSlideAlpha = 0.0f;
-                    app.ShowToast("Pick ANY file inside DEVELOPER settings first!", kDevGold);
+                    app.ShowToast("Pick a Windows .exe inside DEVELOPER settings first!", kDevGold);
                     sfx.Play(SfxId::TabSwitch, 0.85f);
                 } else {
                     TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, btnC6, "gta6", false);
@@ -1816,7 +1849,7 @@ static void RenderLogTab(AppState& app, const FontSet& fonts, SoundEngine& sfx,
 static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine& sfx,
                                ParticleSystem& particles, LocalHttpServer& server,
                                SharedEmulatorState& shared, std::mutex& sharedMu,
-                               DevTargetController& devCtrl,
+                               DevTargetController& devCtrl, EmbeddedExeHost& exeHost,
                                float winW, float winH, float dt, float alpha) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float marginX = std::max(32.0f, (winW - 1060.0f) * 0.5f);
@@ -1825,7 +1858,7 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
 
     ImGui::PushFont(fonts.mono);
     dl->AddText(ImVec2(marginX, topY), ColAlpha(kDevGold, 0.95f * alpha),
-                "FOXXY DEVELOPER ACCESS  ·  EXPERIMENTAL GTA 6, PERFORMANCE: AUTO, .EXE HOOK & FPS TELEMETRY");
+                "FOXXY DEVELOPER ACCESS  ·  FITANYEXE IN-GUI .EXE EMBEDDER, GTA VI INTRO .MP4, DEV OVERLAY & FPS CAP");
     ImGui::PopFont();
 
     ImGui::PushFont(fonts.title);
@@ -1835,7 +1868,7 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     const float boxTop = topY + 56.0f;
     const float boxH = std::max(490.0f, winH - boxTop - 16.0f);
     ImVec2 p0(marginX, boxTop), p1(marginX + contentW, boxTop + boxH);
-    DrawGlassCard(dl, p0, p1, 16.0f, app.config.devExpGta6 ? Palette::VicePink : kDevGold, 0.30f, alpha, false);
+    DrawGlassCard(dl, p0, p1, 16.0f, app.config.devFitAnyExe ? Palette::VicePink : kDevGold, 0.30f, alpha, false);
 
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
 
@@ -1846,26 +1879,11 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     const bool hasExe = IsExeFilePath(app.config.devGta6ExePath);
     const DevTargetStatus devSt = devCtrl.GetStatus();
 
-    // Snapshot live in-game WebGPU FPS & Frame-Time telemetry pushed via /vbx/api/perf
-    double gameFps = 0.0, gameFrameMs = 0.0;
-    int gameTier = 0, gameW = 0, gameH = 0;
-    bool liveGameTelemetry = false;
-    {
-        std::lock_guard<std::mutex> lk(sharedMu);
-        uint64_t ageMs = (shared.livePerfTickMs > 0) ? (GetTickCount64() - shared.livePerfTickMs) : 999999ULL;
-        if (ageMs < 4000ULL && shared.liveGameFps > 0.1) {
-            liveGameTelemetry = true;
-            gameFps = shared.liveGameFps;
-            gameFrameMs = shared.liveGameFrameMs;
-            gameTier = shared.livePerfTier;
-            gameW = shared.liveGameW;
-            gameH = shared.liveGameH;
-        }
-    }
-
     DrawStatusPill(dl, ImVec2(x, y), "OPERATOR: FOXXY  ·  ROOT DEVKIT", kDevGold, alpha, true);
-    if (app.config.devExpGta6) {
-        DrawStatusPill(dl, ImVec2(x + 266.0f, y), "EXPERIMENTAL GTA 6: ARMED (PLAYGTA5 SANDBOX)", Palette::VicePink, alpha, true);
+    if (app.config.devFitAnyExe && hasExe) {
+        DrawStatusPill(dl, ImVec2(x + 266.0f, y), "FITANYEXE: ARMED (INTRO .MP4 + IN-GUI .EXE)", Palette::VicePink, alpha, true);
+    } else if (app.config.devFitAnyExe) {
+        DrawStatusPill(dl, ImVec2(x + 266.0f, y), "FITANYEXE ON — SELECT A .EXE BELOW", kDevGold, alpha, true);
     } else if (hasExe) {
         DrawStatusPill(dl, ImVec2(x + 266.0f, y), ".EXE TARGET ARMED (OVERLAY + FPS CAP READY)", Palette::Emerald, alpha, true);
     }
@@ -1873,62 +1891,45 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
 
     bool devChanged = false;
 
-    // 1. PRIMARY PHASE 2 & 6 CARD: Experimental GTA 6 + Performance: Auto + Live FPS/Frame-Time Counter
+    // 1. PRIMARY DEV CARD: fitanyexe — Play GTA VI Intro .MP4 First, Then Embed Selected .EXE Directly INSIDE ViceBox X GUI!
     {
-        const float expCardH = 92.0f;
-        ImVec2 e0(x, y), e1(x + w, y + expCardH);
+        const float fitCardH = 92.0f;
+        ImVec2 e0(x, y), e1(x + w, y + fitCardH);
         dl->AddRectFilled(e0, e1, ColAlpha(ImVec4(0.14f, 0.05f, 0.12f, 0.72f), alpha), 11.0f);
-        dl->AddRect(e0, e1, ColAlpha(app.config.devExpGta6 ? Palette::VicePink : ImVec4(1, 1, 1, 0.16f), 0.70f * alpha), 11.0f, 0, 1.3f);
+        dl->AddRect(e0, e1, ColAlpha(app.config.devFitAnyExe ? Palette::VicePink : ImVec4(1, 1, 1, 0.16f), 0.72f * alpha), 11.0f, 0, 1.3f);
 
         float ex = e0.x + 14.0f, ey = e0.y + 10.0f;
         ImGui::SetCursorPos(ImVec2(ex, ey));
-        if (ImGui::Checkbox("Experimental GTA 6  (Route GTA VI Launch -> PlayGTA5 GTA VI Sandbox)", &app.config.devExpGta6)) {
-            if (app.config.devExpGta6) app.config.devGta6Enabled = true;
+        if (ImGui::Checkbox("fitanyexe  —  Play GTA VI Intro .MP4 + Load Selected .EXE Inside ViceBox X GUI", &app.config.devFitAnyExe)) {
+            if (app.config.devFitAnyExe) app.config.devGta6Enabled = true;
             devChanged = true;
             sfx.Play(SfxId::Click, 0.80f);
-            app.PushLog(std::string("[DEV] Experimental GTA 6 ") + (app.config.devExpGta6 ? "ENABLED (PlayGTA5 Sandbox Reskin)" : "DISABLED (Restored stock behavior)"));
-            app.ShowToast(app.config.devExpGta6
-                              ? "Experimental GTA 6 ENABLED! GTA VI now boots the Leonida Sandbox experience."
-                              : "Experimental GTA 6 disabled. Stock GTA V & .exe behavior restored.",
+            app.PushLog(std::string("[DEV] fitanyexe ") + (app.config.devFitAnyExe ? "ENABLED (GTA VI .mp4 intro -> in-GUI embedded .exe)" : "DISABLED"));
+            app.ShowToast(app.config.devFitAnyExe
+                              ? "fitanyexe ENABLED! GTA VI plays the intro .mp4 first, then embeds your .exe INSIDE ViceBox X."
+                              : "fitanyexe disabled. Selected .exe will launch in its normal external window.",
                           Palette::VicePink);
         }
 
-        ImGui::SetCursorPos(ImVec2(e1.x - 252.0f, ey));
-        if (ImGui::Checkbox("Performance: Auto (60 FPS)", &app.config.devPerfAuto)) {
-            devChanged = true;
-            sfx.Play(SfxId::Click, 0.65f);
-            app.PushLog(std::string("[DEV] Performance: Auto ") + (app.config.devPerfAuto ? "ON (GTX 1050 60 FPS target)" : "OFF"));
-        }
-
-        // Live FPS & Frame-Time (ms) Telemetry Strip inside Dev Settings
         const float stripY = ey + 34.0f;
         dl->AddRectFilled(ImVec2(ex, stripY), ImVec2(e1.x - 14.0f, stripY + 38.0f),
                           ColAlpha(ImVec4(0.03f, 0.05f, 0.10f, 0.86f), alpha), 8.0f);
         dl->AddRect(ImVec2(ex, stripY), ImVec2(e1.x - 14.0f, stripY + 38.0f),
-                    ColAlpha(Palette::Cyan, 0.34f * alpha), 8.0f);
+                    ColAlpha(app.config.devFitAnyExe ? Palette::VicePink : Palette::Cyan, 0.34f * alpha), 8.0f);
 
-        char perfLine[256];
-        if (liveGameTelemetry) {
-            std::snprintf(perfLine, sizeof(perfLine),
-                          "LIVE GAME TELEMETRY  ·  %.1f FPS  ·  %.2f ms/frame  ·  %dx%d  ·  AUTO TIER %d  (GTX 1050 TARGET: 16.67 ms)",
-                          gameFps, gameFrameMs, gameW > 0 ? gameW : 1920, gameH > 0 ? gameH : 1080, gameTier);
-        } else {
-            float uiFps = ImGui::GetIO().Framerate;
-            float uiMs = (uiFps > 1.0f) ? (1000.0f / uiFps) : 16.67f;
-            std::snprintf(perfLine, sizeof(perfLine),
-                          "FPS & FRAME-TIME MONITOR  ·  UI %.1f FPS (%.2f ms)  ·  PERF: %s  ·  LAUNCH EXPERIMENTAL GTA 6 FOR LIVE WEBGPU FPS",
-                          uiFps, uiMs, app.config.devPerfAuto ? "AUTO (GTX 1050 60FPS)" : "MANUAL");
-        }
+        const char* fitDesc = app.config.devFitAnyExe
+            ? "ACTIVE: Plays embedded GTA VI intro .mp4 first -> captures target .exe -> strips titlebar/borders/menu/taskbar -> embeds directly inside ViceBox X."
+            : "OFF: Enable fitanyexe to play the GTA VI intro .mp4 first and host your selected .exe directly inside ViceBox X without showing its external GUI frame.";
         ImGui::PushFont(fonts.mono);
         dl->AddText(ImVec2(ex + 12.0f, stripY + 11.0f),
-                    ColAlpha(liveGameTelemetry ? Palette::Emerald : Palette::Cyan, alpha), perfLine);
+                    ColAlpha(app.config.devFitAnyExe ? Palette::TextHi : Palette::Cyan, alpha), fitDesc);
         ImGui::PopFont();
-        y += expCardH + 10.0f;
+        y += fitCardH + 10.0f;
     }
 
-    // 2. Toggle Custom .EXE GTA VI Emulation + File Picker (Active when Experimental GTA 6 is OFF)
+    // 2. Toggle Custom .EXE GTA VI Emulation + File Picker
     ImGui::SetCursorPos(ImVec2(x, y));
-    if (ImGui::Checkbox("Enable Custom GTA VI .EXE Emulation (Used when Experimental GTA 6 is OFF)", &app.config.devGta6Enabled)) {
+    if (ImGui::Checkbox("Enable Custom GTA VI .EXE Emulation", &app.config.devGta6Enabled)) {
         devChanged = true;
         sfx.Play(SfxId::Click, 0.75f);
         app.PushLog(std::string("[DEV] GTA VI Dev Override ") + (app.config.devGta6Enabled ? "ENABLED" : "DISABLED"));
@@ -1940,7 +1941,7 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     ImGui::SetCursorPos(ImVec2(x, y + 2.0f));
     ImGui::SetNextItemWidth(pathBoxW);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-    if (ImGui::InputTextWithHint("##dev_path_inp", "Browse any .exe (for Full Dev Overlay + Fake FPS Cap) or any other file/URL",
+    if (ImGui::InputTextWithHint("##dev_path_inp", "Browse any Windows .exe (for fitanyexe In-GUI Embed + Dev Overlay + FPS Cap) or any other file",
                                  app.devPathBuf, sizeof(app.devPathBuf))) {
         app.config.devGta6ExePath = app.devPathBuf;
         devChanged = true;
@@ -1961,7 +1962,9 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
             devChanged = true;
             app.PushLog("[DEV] Bound GTA VI custom target file: " + picked);
             app.ShowToast(IsExeFilePath(picked)
-                              ? "Selected .EXE! Full Dev Overlay & Fake FPS Limiter armed on launch."
+                              ? (app.config.devFitAnyExe
+                                     ? "Selected .EXE! fitanyexe will play GTA VI intro .mp4 & embed it inside ViceBox X."
+                                     : "Selected .EXE! Full Dev Overlay & Fake FPS Limiter armed on launch.")
                               : "Selected GTA VI target file! Launch it from inside the PS5 or Xbox UI.",
                           kDevGold);
         }
@@ -2053,7 +2056,29 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     }
 
     // 4. Live Status Strip
-    if (devSt.running) {
+    if (exeHost.IsActive()) {
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 46.0f),
+                          ColAlpha(ImVec4(0.16f, 0.04f, 0.14f, 0.78f), alpha), 10.0f);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(Palette::VicePink, 0.75f * alpha), 10.0f);
+        char runLine[256];
+        std::snprintf(runLine, sizeof(runLine),
+                      "FITANYEXE ACTIVE: %s  ·  CHROME STRIPPED  ·  EMBEDDED INSIDE VICEBOX X VIEWPORT",
+                      exeHost.ExeName().c_str());
+        ImGui::PushFont(fonts.mono);
+        dl->AddText(ImVec2(x + 14.0f, y + 15.0f), ColAlpha(Palette::TextHi, alpha), runLine);
+        ImGui::PopFont();
+
+        ImGui::SetCursorPos(ImVec2(x + w - 188.0f, y + 7.0f));
+        if (ImGui::Button("STOP EMBEDDED .EXE", ImVec2(176.0f, 32.0f))) {
+            exeHost.Stop();
+            {
+                std::lock_guard<std::mutex> lk(sharedMu);
+                shared.fitExeState = "idle";
+            }
+            sfx.Play(SfxId::Click, 0.70f);
+            app.ShowToast("Stopped embedded .exe cleanly.", Palette::VicePink);
+        }
+    } else if (devSt.running) {
         dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 46.0f),
                           ColAlpha(ImVec4(0.05f, 0.16f, 0.10f, 0.72f), alpha), 10.0f);
         dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(Palette::Emerald, 0.65f * alpha), 10.0f);
@@ -2077,34 +2102,39 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     } else {
         dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 46.0f),
                           ColAlpha(ImVec4(0.14f, 0.10f, 0.03f, 0.55f), alpha), 10.0f);
-        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(app.config.devExpGta6 ? Palette::VicePink : kDevGold, 0.42f * alpha), 10.0f);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + 46.0f), ColAlpha(app.config.devFitAnyExe ? Palette::VicePink : kDevGold, 0.42f * alpha), 10.0f);
         dl->AddText(nullptr, 13.0f, ImVec2(x + 14.0f, y + 8.0f), ColAlpha(Palette::TextHi, 0.92f * alpha),
-                    app.config.devExpGta6
-                        ? "EXPERIMENTAL GTA 6 ACTIVE: Pressing Play on GTA VI inside PS5/Xbox/ViceOS (or below) launches\n"
-                          "the reskinned PlayGTA5 Leonida Sandbox with Boot Intro, 2026 HUD/Minimap, Vice Lighting & Motion Blur."
-                        : "CONSOLE-UI LAUNCH RULE: Selected file launches ONLY when you press Play on Grand Theft Auto VI\n"
-                          "inside PS5 or Xbox UI. Toggle 'Experimental GTA 6' above to test the PlayGTA5 GTA VI skin.",
+                    app.config.devFitAnyExe
+                        ? "FITANYEXE ARMED: Pressing Play on GTA VI inside PS5/Xbox/ViceOS (or below) plays the embedded GTA VI\n"
+                          ".mp4 intro first, then embeds your selected .exe directly INSIDE ViceBox X without showing its external GUI."
+                        : "CONSOLE-UI LAUNCH RULE: Selected file launches when you press Play on Grand Theft Auto VI\n"
+                          "inside PS5, Xbox, or ViceOS UI. Enable 'fitanyexe' above to embed the .exe directly inside ViceBox X.",
                     nullptr, w - 28.0f);
     }
     y += 56.0f;
 
-    // 5. Action Buttons: Direct Experimental GTA 6 Launch + Console UI Mount + ALL Mode
+    // 5. Action Buttons: Direct fitanyexe Launch + Console UI Mount + ALL Mode
     const int devCt = std::max(0, std::min(2, app.config.consoleTarget));
-    const bool consoleGta6Ready = app.config.devExpGta6 || (app.config.devGta6Enabled && !app.config.devGta6ExePath.empty());
+    const bool fitReady = app.config.devFitAnyExe && hasExe;
+    const bool consoleGta6Ready = (app.config.devGta6Enabled || app.config.devFitAnyExe) && !app.config.devGta6ExePath.empty();
     float curBtnX = x;
-    if (app.config.devExpGta6) {
+    if (app.config.devFitAnyExe) {
         ImGui::SetCursorPos(ImVec2(curBtnX, y));
-        ImVec2 bExpC{};
+        ImVec2 bFitC{};
         ImGui::PushFont(fonts.bold);
-        bool launchExp = !app.launching && DrawNeonButton(
-            "##dev_launch_exp6", "LAUNCH EXPERIMENTAL GTA 6",
-            ImVec2(290.0f, 42.0f), ImVec4(0.68f, 0.12f, 0.42f, 1.0f), Palette::VicePink,
-            app.btnDevLaunchHover, dt, sfx, false, alpha, &bExpC);
+        bool launchFit = !app.launching && DrawNeonButton(
+            "##dev_launch_fitexe", "LAUNCH FITANYEXE (.MP4 + .EXE)",
+            ImVec2(304.0f, 42.0f), ImVec4(0.68f, 0.12f, 0.42f, 1.0f), Palette::VicePink,
+            app.btnDevLaunchHover, dt, sfx, !fitReady, alpha, &bFitC);
         ImGui::PopFont();
-        if (launchExp) {
-            TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bExpC, "gta6", false, true);
+        if (launchFit) {
+            if (!fitReady) {
+                app.ShowToast("Pick a Windows .exe file above to launch with fitanyexe!", kDevGold);
+            } else {
+                TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bFitC, "gta6", false, true);
+            }
         }
-        curBtnX += 304.0f;
+        curBtnX += 318.0f;
     }
 
     char devBootLbl[80];
@@ -2114,19 +2144,19 @@ static void RenderDeveloperTab(AppState& app, const FontSet& fonts, SoundEngine&
     ImGui::PushFont(fonts.bold);
     bool bootDevConsole = !app.launching && DrawNeonButton(
         "##dev_boot_console", devBootLbl,
-        ImVec2(app.config.devExpGta6 ? 296.0f : 360.0f, 42.0f), kDevGoldDk, kDevGold,
-        app.config.devExpGta6 ? app.btnDevBrowseHover : app.btnDevLaunchHover, dt, sfx,
+        ImVec2(app.config.devFitAnyExe ? 286.0f : 360.0f, 42.0f), kDevGoldDk, kDevGold,
+        app.config.devFitAnyExe ? app.btnDevBrowseHover : app.btnDevLaunchHover, dt, sfx,
         !consoleGta6Ready, alpha, &bCenter);
     ImGui::PopFont();
 
     if (bootDevConsole) {
         if (!consoleGta6Ready) {
-            app.ShowToast("Enable Experimental GTA 6 or pick a custom GTA VI file first.", kDevGold);
+            app.ShowToast("Pick a custom GTA VI .exe/file above first.", kDevGold);
         } else {
             TriggerConsoleLaunch(app, server, shared, sharedMu, sfx, particles, bCenter, "gta6", false);
         }
     }
-    curBtnX += (app.config.devExpGta6 ? 310.0f : 376.0f);
+    curBtnX += (app.config.devFitAnyExe ? 300.0f : 376.0f);
 
     ImGui::SetCursorPos(ImVec2(curBtnX, y));
     ImVec2 bAllCenter{};
@@ -2159,6 +2189,9 @@ static void RenderLaunchOverlay(AppState& app, const FontSet& fonts, SoundEngine
             sfx.Play(SfxId::LoginSuccess, 0.75f);
 
             if (useEmbedded) {
+                if (g_ExeHost && g_ExeHost->IsActive()) {
+                    g_ExeHost->Stop();
+                }
                 ExpandWindowForViewport(g_hWnd);
                 if (app.config.viewportMode == 1) {
                     SetBorderlessFullscreen(g_hWnd, true);
@@ -2278,7 +2311,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     g_hWnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         wc.lpszClassName,
-        L"VICEBOX X v2.5 — Embedded Console & GTA V PC Emulator",
+        L"VICEBOX X v3.0 — Embedded Console & fitanyexe PC Emulator",
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CLIPCHILDREN,
         posX, posY, winW, winH,
         nullptr, nullptr, hInstance, nullptr);
@@ -2329,7 +2362,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     bool serverOk = httpServer.Start(&hwMonitor, &sharedState, &sharedMu, &devCtrl);
     app.serverPort = httpServer.Port();
 
-    // Initialize Embedded Microsoft Edge WebView2 Viewport Host (renders consoles + GTA V inside ViceBox X!)
+    // Initialize Embedded Microsoft Edge WebView2 Viewport Host (renders consoles + GTA V + GTA VI intro .mp4 inside ViceBox X!)
     EmbeddedViewportHost viewportHost;
     g_ViewportHost = &viewportHost;
     viewportHost.Init(g_hWnd, GetEmbeddedWebViewDir(), app.config.optimizationMode);
@@ -2346,6 +2379,46 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         },
         [&](const std::string& msg) {
             app.PushLog(msg);
+        });
+
+    // Initialize Native Win32 Embedded .EXE Viewport Host ("fitanyexe" Developer Feature)
+    EmbeddedExeHost exeHost;
+    g_ExeHost = &exeHost;
+    exeHost.Init(g_hWnd);
+    exeHost.SetCallbacks(
+        [&](const std::string& exeName) {
+            {
+                std::lock_guard<std::mutex> lk(sharedMu);
+                sharedState.fitExeState = "embedded";
+                sharedState.fitExeName = exeName;
+                sharedState.fitExeError.clear();
+            }
+            // Hide WebView2 seamlessly underneath so ONLY the embedded .exe shows inside ViceBox X's GUI!
+            viewportHost.Hide();
+            app.ShowToast(exeName + " embedded INSIDE ViceBox X viewport (F11 for Fullscreen)", Palette::VicePink);
+        },
+        [&](const std::string& exeName) {
+            std::string retRoute;
+            {
+                std::lock_guard<std::mutex> lk(sharedMu);
+                sharedState.fitExeState = "idle";
+                retRoute = (sharedState.fitExeReturnConsole == "xbox") ? "/xbox/"
+                         : (sharedState.fitExeReturnConsole == "viceos" ? "/viceos/" : "/ps5/");
+            }
+            if (g_BorderlessFs) SetBorderlessFullscreen(g_hWnd, false);
+            RECT rc{};
+            GetClientRect(g_hWnd, &rc);
+            viewportHost.OpenUrl(httpServer.BaseUrl() + retRoute, ActiveViewportTopOffset(),
+                                 rc.right - rc.left, rc.bottom - rc.top);
+            app.ShowToast(exeName + " closed — returned to ViceBox X", Palette::Cyan);
+        },
+        [&](const std::string& errMsg) {
+            std::lock_guard<std::mutex> lk(sharedMu);
+            sharedState.fitExeState = "error";
+            sharedState.fitExeError = errMsg;
+        },
+        [&](const std::string& logMsg) {
+            app.PushLog(logMsg);
         });
 
     ShowWindow(g_hWnd, SW_SHOWDEFAULT);
@@ -2371,7 +2444,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ParticleSystem particles;
     particles.Init(static_cast<float>(winW), static_cast<float>(winH));
 
-    app.PushLog("[HYPERVISOR] ViceBox X v2.5 initialized (Embedded WebGPU Emulator Viewport + ALL Mode + ViceOS Neo)");
+    app.PushLog("[HYPERVISOR] ViceBox X v3.0 initialized (Embedded WebGPU Viewport + fitanyexe In-GUI .EXE Embedder + ViceOS Neo)");
     app.PushLog(viewportHost.IsSupportedBuild()
                     ? "[VIEWPORT] Embedded Edge WebView2 Host compiled in (zero external DLLs, static loader)"
                     : "[VIEWPORT] WebView2 SDK not present in build — using external frameless window fallback");
@@ -2379,7 +2452,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     app.PushLog("[HWMON] Real Windows CPU/GPU/VRAM/RAM telemetry monitor started");
     if (serverOk) {
         app.PushLog("[HTTP] Embedded console & GTA V COOP/COEP proxy active at " + httpServer.BaseUrl());
-        app.PushLog("[ASSETS] Mounted PS5_Online UI, DashX360 Metro+Blades, ViceOS Neo, GTA 6 Updates & 29 game artworks");
+        app.PushLog("[ASSETS] Mounted PS5_Online UI, DashX360 Metro+Blades, ViceOS Neo, GTA 6 Intro .MP4 & 29 game artworks");
     } else {
         app.PushLog("[HTTP] ERROR: Failed to start local server on 127.0.0.1");
     }
@@ -2407,9 +2480,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             SyncViewportBounds();
         }
 
-        // Edge-triggered F11 fullscreen toggle even while WebView2 child viewport holds focus!
+        // Check for fitanyexe attach trigger from HTTP worker (after GTA VI intro .mp4 completes!)
+        {
+            bool doAttach = false;
+            {
+                std::lock_guard<std::mutex> lk(sharedMu);
+                if (sharedState.fitExePendingAttach) {
+                    sharedState.fitExePendingAttach = false;
+                    doAttach = true;
+                }
+            }
+            if (doAttach) {
+                ExpandWindowForViewport(g_hWnd);
+                RECT rc{};
+                GetClientRect(g_hWnd, &rc);
+                exeHost.BeginAttach(&devCtrl, ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+            }
+            if (exeHost.IsActive()) {
+                RECT rc{};
+                GetClientRect(g_hWnd, &rc);
+                exeHost.Tick(ActiveViewportTopOffset(), rc.right - rc.left, rc.bottom - rc.top);
+            }
+        }
+
+        // Edge-triggered F11 fullscreen toggle even while WebView2 or embedded .exe holds focus!
         bool f11Down = ((GetAsyncKeyState(VK_F11) & 0x8000) != 0);
-        if (f11Down && !prevF11Down && viewportHost.IsVisible() && GetForegroundWindow() == g_hWnd) {
+        if (f11Down && !prevF11Down &&
+            (viewportHost.IsVisible() || exeHost.IsVisible()) &&
+            (GetForegroundWindow() == g_hWnd || exeHost.IsVisible())) {
             SetBorderlessFullscreen(g_hWnd, !g_BorderlessFs);
         }
         prevF11Down = f11Down;
@@ -2433,8 +2531,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         ImGui::NewFrame();
 
         const ImVec2 disp = io.DisplaySize;
+        const bool anyChildViewport = viewportHost.IsVisible() || exeHost.IsVisible();
 
-        if (!viewportHost.IsVisible()) {
+        if (!anyChildViewport) {
             particles.UpdateAndRender(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), disp, io.MousePos, dt, elapsedTime);
         }
 
@@ -2445,10 +2544,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-        RenderHeaderBar(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, viewportHost,
+        RenderHeaderBar(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, viewportHost, exeHost,
                         disp.x, dt, elapsedTime);
 
-        if (viewportHost.IsVisible()) {
+        if (exeHost.IsVisible()) {
+            // Embedded .exe occupies the native Win32 child viewport cleanly below the ViceBox X top bar!
+        } else if (viewportHost.IsVisible()) {
             // While WebView2 finishes spinning up (~200ms cold start), show a clean centered loader!
             if (!viewportHost.IsReady()) {
                 ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -2485,7 +2586,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             } else if (app.activeTab == 2) {
                 RenderLogTab(app, fonts, sfx, disp.x, disp.y, combinedA);
             } else if (app.activeTab == 3 && app.isFoxxyDev) {
-                RenderDeveloperTab(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, devCtrl,
+                RenderDeveloperTab(app, fonts, sfx, particles, httpServer, sharedState, sharedMu, devCtrl, exeHost,
                                    disp.x, disp.y, dt, combinedA);
             }
         }
@@ -2499,7 +2600,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         ImGui::End();
 
         RenderLaunchOverlay(app, fonts, sfx, particles, viewportHost, disp.x, disp.y, dt, elapsedTime);
-        if (!viewportHost.IsVisible()) {
+        if (!anyChildViewport) {
             RenderToast(app, disp.x, disp.y, dt);
         }
 
@@ -2511,6 +2612,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         g_pSwapChain->Present(1, 0);
     }
 
+    exeHost.Shutdown();
+    g_ExeHost = nullptr;
     viewportHost.Shutdown();
     g_ViewportHost = nullptr;
     httpServer.Stop();
